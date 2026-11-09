@@ -1,0 +1,13 @@
+{
+  "bind_host": "0.0.0.0",
+  "bind_port": 6515,
+  "database_path": "C:\\ProgramData\\WatcherCollector\\watcher-events.db",
+  "csv_dir": "C:\\Watcher\\Feeds\\Connections",
+  "log_file": "C:\\ProgramData\\WatcherCollector\\collector.log",
+  "csv_export_seconds": 10,
+  "max_clients": 64,
+  "allowed_client_cidrs": [
+    "10.90.0.0/16",
+    "156.100.0.0/16"
+  ]
+}

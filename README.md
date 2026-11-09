@@ -1,1 +1,175 @@
-# Listener
+# Watcher V6 — PLAIN TCP collector + Windows/Linux agents (install/uninstall GUI)
+
+**No authentication tokens. No TLS certificates. No private/public keys. No Python needed for the installed C# programs.**
+
+This is a change to the **network protocol**, not just a fix to a certificate-loading flag. You MUST replace **both** the collector and every participating agent. An old TLS agent cannot talk to a plaintext collector, or vice versa.
+
+> SECURITY: This transport is **NOT encrypted, NOT authenticated**. A machine that can access the listener can read/inject event contents and can claim any `MONITORED_HOST`. The `COLLECTOR_PEER_IP` column is the transport peer IP, not proof of the host identity. Only use on a restricted management VLAN or similarly isolated network. Restrict port 6515 by Windows Firewall and the collector's CIDR allowlist. Never expose this service to the Internet. If the network is not trusted, use TLS + device identities or carry TCP inside a protected VPN tunnel instead.
+
+## V6: Uninstall buttons in both Windows installers
+
+Both Windows graphical installers now provide a visible **Uninstall** button, without affecting the network protocol. The install/update buttons still work as in V5. Rebuild **both** Windows GUI installers from these source files to get the buttons (older already-compiled EXEs will not update themselves).
+
+**Agent:** Open `Agent/output/windows-installer/WatcherInstaller.exe` **as Administrator**, select **Uninstall Agent**, and confirm. This stops and removes the `Watcher-Connection-Agent` scheduled task, terminates only the installed `WatcherAgent.exe` process, and deletes `C:\Program Files\Watcher\Agent`. By default **`C:\ProgramData\WatcherAgent` is preserved**, including `agent.json` and any unsent event spool. To remove these files too, check *Also delete local configuration and buffered unsent events* **before** clicking Uninstall. That action permanently deletes unsent events.
+
+**Collector:** Open `Collector/output/windows-installer/WatcherCollectorInstaller.exe` **as Administrator**, select **Uninstall Collector**, and confirm. It stops/deletes the `WatcherCollector` service, removes its application binaries from `C:\Program Files\Watcher\Collector` and removes only Windows Firewall rules named `Watcher Collector TCP <port>` or `Watcher Collector TLS <port>`. By default **`C:\ProgramData\WatcherCollector` is preserved**, including the collector config, SQLite DB and logs. To delete this entire directory, select *Also delete collector configuration, SQLite database and logs in ProgramData* before uninstall and accept an additional confirmation.
+
+**Preservation/safety:** The collector uninstall always keeps exported CSV files wherever they are configured (usually `C:\Watcher\Feeds\Connections`). A SQLite database configured **outside** ProgramData is also preserved even when data deletion is selected. The Agent uninstaller does not uninstall the Collector; the Collector uninstaller does not uninstall agents installed on other hosts. The Collector does not uninstall the older standalone Python collector; stop it separately if needed. Back up forensic records before any data removal. You may need a reboot if Windows still holds a deleted Windows service open.
+
+After uninstalling, verify:
+
+```powershell
+Get-ScheduledTask -TaskName 'Watcher-Connection-Agent' -ErrorAction SilentlyContinue
+Get-Service WatcherCollector -ErrorAction SilentlyContinue
+Test-Path 'C:\Program Files\Watcher\Agent\WatcherAgent.exe'
+Test-Path 'C:\Program Files\Watcher\Collector\WatcherCollector.exe'
+```
+
+An absent task/service and two `False` results indicate the installed components are gone. If you chose to preserve ProgramData, those folders should still exist.
+
+## Project contents
+
+- `Collector/Watcher-Collector.sln` — Visual Studio project containing native C# collector + graphical Windows collector installer.
+- `Agent/Watcher-Compiled-Installer.sln` — native C# Windows/Linux agent + graphical Windows agent installer.
+- `Collector/build/build-windows.ps1` — publishes a self-contained collector EXE, then embeds it in a self-contained GUI installer EXE.
+- `Agent/build/build-windows.ps1` — builds a self-contained GUI agent installer embedding the agent EXE.
+- `Agent/build/build-linux.sh` — creates a Debian 12 amd64 `.deb` (requires .NET 10 SDK, `dpkg-deb`).
+- `build-windows-all.ps1` — publishes both Windows installer EXEs.
+
+The source compiles with the .NET 10 SDK on Windows. The collector uses NuGet packages `Microsoft.Data.Sqlite` and `Microsoft.Extensions.Hosting.WindowsServices` for storage and service hosting. NuGet access (or configured offline cache) is needed at build time, but the published executables include the .NET runtime.
+
+## First: set the collector address ONCE before compiling the Agent
+
+Edit `Agent/src/WatcherAgent/CollectorSettings.cs`:
+
+```csharp
+public const string Host = "watcher-collector.domain.local";
+public const int Port = 6515;
+```
+
+Enter the DNS name or IP address where the collector will listen. The C# agent has no token, certificate or external collector-address setting: this constant is built into the EXE. All agents built from the same source will connect to that collector.
+
+The installer also shows the compiled address and automatically populates the agent hostname. The agent's `agent.json` only contains `agent_id` and local `spool_dir`.
+
+## Build Windows installers
+
+Open PowerShell at the root directory, then:
+
+```powershell
+.\build-windows-all.ps1
+```
+
+The resulting installers should be at:
+
+```text
+Collector\output\windows-installer\WatcherCollectorInstaller.exe
+Agent\output\windows-installer\WatcherInstaller.exe
+```
+
+**Build the source with Visual Studio 2026 / .NET 10 SDK. Running or double-clicking the EXE generated in `src/.../bin/` is not a substitute for running the GUI installer.**
+
+If MSBuild prompts to restore NuGet packages, allow restore on the development workstation. No Python setup is necessary for the C# binaries.
+
+## Install the collector first (Windows)
+
+1. On the Windows collector host, stop any old Python collector or V4 C# collector using port 6515. The V5 GUI installer can stop/reconfigure the existing `WatcherCollector` Windows service, but does not stop a separately launched Python collector.
+2. **Back up** `C:\ProgramData\WatcherCollector\watcher-events.db` (or your previous Python collector database) before the upgrade. Never run old and new collectors against the same SQLite database simultaneously.
+3. Run **`WatcherCollectorInstaller.exe`** as Administrator.
+4. Set `Listening port` to **6515** unless you compiled a different port into your agents.
+5. Set `Allowed agent IP networks` to the **source IP ranges of your agent machines**, e.g. `10.90.20.0/24,156.100.0.77/32` if those are the actual agent ranges. **Do not use `0.0.0.0/0`.**
+6. Click **Install / Update**. The installer writes `C:\ProgramData\WatcherCollector\collector.json`, installs `C:\Program Files\Watcher\Collector\WatcherCollector.exe`, creates `WatcherCollector` as an auto-start service, and adds a restricted inbound Windows Firewall rule.
+
+**No `.crt`, `.key`, `.pfx`, CA generation, password, or registration steps are required.** Old certificate files might still remain from prior V4 installations, but this V5 collector never loads them. Remove them separately after confirming they are not used elsewhere and after backing up anything needed.
+
+Collector files:
+
+```text
+C:\ProgramData\WatcherCollector\
+    collector.json
+    watcher-events.db
+    collector.log
+C:\Watcher\Feeds\Connections\HOSTNAME\YYYY-MM-DD.csv
+```
+
+The CSV files use a `;` delimiter and are compatible with the earlier Watcher field names (`RECIEVER_IP`, `PORT_USED`, etc.).
+
+## Install an agent (Windows)
+
+1. Run **`WatcherInstaller.exe`** as Administrator.
+2. Verify its precompiled collector DNS name/IP and port shown at the top.
+3. Confirm the machine name/agent ID; click **Install / Update**. There are **no** token/certificate fields.
+4. It installs `C:\Program Files\Watcher\Agent\WatcherAgent.exe` and creates `C:\ProgramData\WatcherAgent\agent.json` and `spool\`.
+5. It registers a Windows scheduled task `Watcher-Connection-Agent` under the SYSTEM account.
+
+To run one manual collection/transmission and see errors:
+
+```powershell
+& 'C:\Program Files\Watcher\Agent\WatcherAgent.exe' --once
+```
+
+To check startup registration:
+
+```powershell
+Get-ScheduledTask -TaskName 'Watcher-Connection-Agent'
+```
+
+The user must allow outbound TCP traffic from the agent machine to the collector IP on port 6515.
+
+## Install an agent (Linux)
+
+On a Debian 12 amd64 build machine with .NET 10 SDK, run:
+
+```bash
+cd Agent
+./build/build-linux.sh
+```
+
+The package will be written to `Agent/output/watcher-agent_1.0.0_amd64.deb`. On the target Linux machine:
+
+```bash
+sudo apt install ./watcher-agent_1.0.0_amd64.deb
+sudo systemctl status watcher-agent
+sudo journalctl -u watcher-agent -n 50 --no-pager
+```
+
+It automatically creates `/etc/watcher-agent/agent.json`, installs the agent, and enables the systemd service. No certificates, keys, tokens or enrollment step.
+
+The Linux agent uses `ss` from `iproute2`, and should be run with appropriate privileges to see process names.
+
+## Validate communication and storage
+
+On collector PC:
+
+```powershell
+Get-Service WatcherCollector
+Get-NetTCPConnection -LocalPort 6515 -State Listen
+Get-Content 'C:\ProgramData\WatcherCollector\collector.log' -Tail 30
+Get-ChildItem 'C:\Watcher\Feeds\Connections' -Recurse -Filter *.csv
+```
+
+On agent PC:
+
+```powershell
+Test-NetConnection watcher-collector.domain.local -Port 6515
+& 'C:\Program Files\Watcher\Agent\WatcherAgent.exe' --once
+```
+
+Replace the example host with your collector's actual compiled hostname.
+
+### Event protocol
+
+Each agent sends one UTF-8 JSON object per line with an `event` field, e.g. `{"event":{"EVENT_ID":"<uuid>","MONITORED_HOST":"dc-03.local","EVENT_TYPE":"HEARTBEAT","TIMESTAMP_UTC":"2026-11-05T10:00:00Z"}}\n`. The collector stores the event in SQLite, then responds `ACK <uuid>\n`. An event is removed from the agent's spool **only after receiving its matching ACK**. Duplicate `EVENT_ID`s are stored once. CSV is regenerated for the affected host/day.
+
+### Limitations
+
+- The polling agent can miss TCP connections shorter than its poll interval and will report `TCP_DISCONNECTED` when a connection disappears between observations, not necessarily on a wire-level FIN/RST.
+- An unauthenticated collector cannot reliably distinguish forged sender identities. Use a restricted infrastructure segment and avoid sensitive log contents.
+- This version **does not interoperate** with existing TLS-enabled Watcher V3/V4 components. Upgrade both ends.
+
+## Build/test status
+
+These are **source files**, not compiled executables. If your machine has the .NET SDK, use the build script. C# binaries must still be compiled and tested on your Windows/Linux deployment targets. Static protocol/configuration checks are included in `tests/validate_plain_tcp.py`.
+
+## Source review
+
+See [REVIEW.md](REVIEW.md) for architecture, deployment limitations, and the build/test results recorded when importing this source into TEA-GD/Listener.

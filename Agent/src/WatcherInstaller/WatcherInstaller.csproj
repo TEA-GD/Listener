@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>WatcherInstaller</AssemblyName>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <!-- Link the exact collector settings used by WatcherAgent so the UI never displays a stale address. -->
+  <ItemGroup>
+    <Compile Include="../WatcherAgent/CollectorSettings.cs" Link="CollectorSettings.cs" />
+  </ItemGroup>
+  <!-- Create the embedded agent binary before MSBuild computes embedded resources. -->
+  <Target Name="PrepareEmbeddedAgent" BeforeTargets="AssignTargetPaths"
+          Condition="'$(DesignTimeBuild)' != 'true'">
+    <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)/../WatcherAgent/WatcherAgent.csproj&quot; -c $(Configuration) -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none -o &quot;$(MSBuildProjectDirectory)/payload&quot;" />
+    <ItemGroup>
+      <EmbeddedResource Include="$(MSBuildProjectDirectory)/payload/WatcherAgent.exe" LogicalName="Watcher.Agent.Payload" />
+    </ItemGroup>
+  </Target>
+</Project>

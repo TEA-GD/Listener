@@ -1,0 +1,9 @@
+**/bin/
+**/obj/
+**/payload/
+**/output/
+.vs/
+*.user
+*.suo
+__pycache__/
+*.pyc
