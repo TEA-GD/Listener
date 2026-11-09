@@ -76,8 +76,8 @@ If MSBuild prompts to restore NuGet packages, allow restore on the development w
 2. **Back up** `C:\ProgramData\WatcherCollector\watcher-events.db` (or your previous Python collector database) before the upgrade. Never run old and new collectors against the same SQLite database simultaneously.
 3. Run **`WatcherCollectorInstaller.exe`** as Administrator.
 4. Set `Listening port` to **6515** unless you compiled a different port into your agents.
-5. Set `Allowed agent IP networks` to the **source IP ranges of your agent machines**, e.g. `10.90.20.0/24,156.100.0.77/32` if those are the actual agent ranges. **Do not use `0.0.0.0/0`.**
-6. Click **Install / Update**. The installer writes `C:\ProgramData\WatcherCollector\collector.json`, installs `C:\Program Files\Watcher\Collector\WatcherCollector.exe`, creates `WatcherCollector` as an auto-start service, and adds a restricted inbound Windows Firewall rule.
+5. Optionally set `Allowed agent IP networks` to the **source IP ranges of your agent machines**, e.g. `10.90.20.0/24,156.100.0.77/32` if those are the actual agent ranges. Leave the field blank to accept any sender on the selected port. If supplying CIDRs, do not use `0.0.0.0/0`.
+6. Click **Install / Update**. The installer writes `C:\ProgramData\WatcherCollector\collector.json`, installs `C:\Program Files\Watcher\Collector\WatcherCollector.exe`, creates `WatcherCollector` as an auto-start service, and adds an inbound Windows Firewall rule on Domain/Private profiles, restricted to the supplied CIDRs when present.
 
 **No `.crt`, `.key`, `.pfx`, CA generation, password, or registration steps are required.** Old certificate files might still remain from prior V4 installations, but this V5 collector never loads them. Remove them separately after confirming they are not used elsewhere and after backing up anything needed.
 
@@ -212,3 +212,22 @@ Run the database integration checks with .NET 10:
 ```powershell
 dotnet run --project tests/DatabaseIntegration -c Release
 ```
+
+## Port-only collector setup
+
+Choose the listening port (default **6515**) and leave **Optional allowed agent
+networks** blank. The collector listens on all IPv4 interfaces on that PC;
+no local IP or hostname needs to be entered. The default firewall rule allows
+that port on Domain/Private profiles, with any remote address in this mode.
+Public-profile inbound access is not enabled by the installer.
+
+For manual configuration, omit `bind_host` (defaults to `0.0.0.0`) and omit
+`allowed_client_cidrs`, or set it to `[]`. To retain sender filtering, supply
+CIDRs as before. Existing configured CIDRs remain effective after upgrading;
+clear the installer field and click Install / Update to switch to port-only mode.
+
+Agents still need the collector PC's DNS name or IP and port as their destination;
+listening on a port does not discover agents or capture unrelated network traffic.
+This remains the Watcher JSON-line TCP protocol. With no sender filter, any sender
+that can reach the port can submit events; the transport has no authentication
+or encryption. Use a trusted network or protected VPN.

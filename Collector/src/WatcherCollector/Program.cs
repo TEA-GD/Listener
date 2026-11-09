@@ -34,8 +34,7 @@ internal sealed class CollectorConfig
         if (c.max_clients is < 1 or > 1024) throw new ArgumentException("max_clients must be 1..1024");
         if (new[] { c.database_path, c.csv_dir, c.log_file }.Any(string.IsNullOrWhiteSpace))
             throw new ArgumentException("database_path, csv_dir, and log_file are required");
-        if (c.allowed_client_cidrs is null || c.allowed_client_cidrs.Length == 0)
-            throw new ArgumentException("allowed_client_cidrs must list the actual endpoint networks");
+        c.allowed_client_cidrs ??= Array.Empty<string>();
         foreach (string entry in c.allowed_client_cidrs) _ = Cidr.Parse(entry);
         return c;
     }
@@ -159,6 +158,7 @@ internal sealed class CollectorWorker(CollectorConfig cfg) : BackgroundService
             var listener = new TcpListener(IPAddress.Parse(cfg.bind_host), cfg.bind_port);
             listener.Start(128);
             Log.Write($"STARTED PLAIN TCP {cfg.bind_host}:{cfg.bind_port}; no TLS; no tokens; permitted CIDRs: {string.Join(",", cfg.allowed_client_cidrs)}");
+            if (networks.Length == 0) Log.Write("IP filtering disabled: accepting any sender reachable on the listening port.");
             Log.Write("WARNING: INSECURE PLAIN TCP. No encryption, no authentication. Restrict firewall and use isolated management networks.");
             Task exportTask = ExportLoop(stoppingToken);
             var active = new ConcurrentDictionary<long, Task>();
@@ -171,7 +171,7 @@ internal sealed class CollectorWorker(CollectorConfig cfg) : BackgroundService
                     try { client = await listener.AcceptTcpClientAsync(stoppingToken); }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
                     var peer = (IPEndPoint)client.Client.RemoteEndPoint!;
-                    if (!networks.Any(n => n.Contains(peer.Address)))
+                    if (networks.Length > 0 && !networks.Any(n => n.Contains(peer.Address)))
                     {
                         Log.Write($"BLOCKED {peer.Address} (CIDR)");
                         client.Dispose();

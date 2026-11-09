@@ -26,7 +26,7 @@ class Verify(unittest.TestCase):
         conf = json.loads((ROOT/'Collector/src/WatcherCollector/collector.example.json').read_text())
         self.assertNotIn('tls_pfx_file', conf)
         self.assertEqual(6515, conf['bind_port'])
-        self.assertTrue(conf['allowed_client_cidrs'])
+        self.assertEqual([], conf['allowed_client_cidrs'])
 
     def test_ack_protocol(self):
         self.assertIn('"ACK " + id + "\\n"', self.collector)

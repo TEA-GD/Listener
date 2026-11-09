@@ -8,7 +8,7 @@ Watcher records TCP connection metadata, rather than packet contents. The Window
 
 Events are flushed to local JSON spool files (maximum 50,000 pending events). Each send handles up to 1,000 queued events. The agent sends newline-delimited JSON over TCP port 6515 and removes an event only after receiving its matching `ACK <EVENT_ID>`.
 
-The Windows collector checks the source IP against configured CIDRs, validates required event fields, and commits events to SQLite before acknowledging them. Duplicate event IDs are ignored. It periodically regenerates semicolon-delimited CSV files per host and UTC day. The peer IP is supplied by the collector, overriding any agent-supplied value.
+The Windows collector checks the source IP when optional CIDRs are configured, validates required event fields, and commits events to SQLite before acknowledging them. Duplicate event IDs are ignored. It periodically regenerates semicolon-delimited CSV files per host and UTC day. The peer IP is supplied by the collector, overriding any agent-supplied value.
 
 Windows GUI installers embed the application binaries. The collector runs as a Windows service with a restricted firewall rule; the agent runs as a SYSTEM scheduled task at startup. Linux packaging targets Debian 12 amd64 with systemd. Uninstall defaults preserve ProgramData and unsent events; optional deletion removes that local data. Collector CSV exports outside the deleted data directory are preserved.
 
@@ -41,3 +41,11 @@ fresh storage, legacy backfill, repeated initialization, event deduplication,
 trusted peer IP, CSV escaping/export state, and rollback for malformed legacy
 JSON. These database checks pass on Linux; Windows installation and live network
 integration remain deployment-target checks.
+
+## Port-only listener update
+
+The installer no longer requires agent IP networks. Empty/omitted CIDRs accept
+any reachable sender; supplied CIDRs continue to filter clients. Default binding
+is all IPv4 interfaces. Live loopback integration tests exercise a port-only
+heartbeat, matching ACK and database record, and rejection with a nonmatching
+CIDR list. Windows firewall installation remains a deployment-target check.

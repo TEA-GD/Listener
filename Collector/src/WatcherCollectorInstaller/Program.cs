@@ -61,9 +61,9 @@ internal sealed class SetupForm : Form
         _port.Value = 6515;
         _port.SetBounds(20, 155, 155, 27);
         Controls.Add(_port);
-        AddLabel("Allowed agent IP networks (CIDR, separated by commas — no 0.0.0.0/0)", 20, 198);
+        AddLabel("Optional allowed agent networks (CIDRs; leave blank to accept any sender)", 20, 198);
         _networks.SetBounds(20, 224, 716, 27);
-        _networks.PlaceholderText = "Example: 10.90.0.0/16,156.100.0.0/16";
+        _networks.PlaceholderText = "Blank = any sender; or e.g. 192.168.88.0/24";
         Controls.Add(_networks);
         AddLabel("WARNING: Plain TCP; no encryption or sender authentication. Use restricted VLAN/firewall.", 20, 269, bold: true);
         AddLabel("Installation messages", 20, 310);
@@ -74,7 +74,7 @@ internal sealed class SetupForm : Form
         _log.Font = new Font("Consolas", 9);
         _log.Text = "No Python, certificate or token required. This installer embeds WatcherCollector.exe.\r\n" +
             $"Service: {ServiceName}\r\nData: {DataDir}\r\n" +
-            "IMPORTANT: Enter only your real corporate endpoint subnets.\r\n";
+            "Listens on all IPv4 interfaces. Agent networks are optional.\r\n";
         Controls.Add(_log);
         _deleteData.Text = "Also delete collector configuration, SQLite database and logs in ProgramData";
         _deleteData.SetBounds(20, 547, 710, 25);
@@ -149,7 +149,6 @@ internal sealed class SetupForm : Form
         if (!new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator))
             throw new UnauthorizedAccessException("Start the installer with administrator permissions.");
         string[] ranges = _networks.Text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        if (ranges.Length == 0) throw new ArgumentException("Enter at least one actual corporate CIDR range.");
         foreach (string range in ranges) ValidateCidr(range);
         Write("Stopping previous collector, if installed...");
         StopService();
@@ -197,7 +196,7 @@ internal sealed class SetupForm : Form
         else
             Sc("create", ServiceName, "binPath=", commandLine, "start=", "auto", "DisplayName=", "Watcher Collector SIEM");
         Sc("description", ServiceName, "Watcher SIEM plain TCP collector; no certificates/tokens; JSONL/ACK to SQLite and CSV");
-        Write("Creating restricted inbound firewall rule...");
+        Write("Creating inbound firewall rule for Domain/Private profiles...");
         // Remove old TLS-mode firewall rule for this port to avoid stale unrestricted configuration.
         string oldRule = "Watcher Collector TLS " + _port.Value;
         string safeOldRule = oldRule.Replace("'", "''");
@@ -205,7 +204,7 @@ internal sealed class SetupForm : Form
             $"Get-NetFirewallRule -DisplayName '{safeOldRule}' -ErrorAction SilentlyContinue | Remove-NetFirewallRule" });
         string ruleName = "Watcher Collector TCP " + _port.Value;
         string safeName = ruleName.Replace("'", "''");
-        string cidrs = string.Join(",", ranges);
+        string cidrs = ranges.Length == 0 ? "Any" : string.Join(",", ranges);
         string ps = $"Get-NetFirewallRule -DisplayName '{safeName}' -ErrorAction SilentlyContinue | Remove-NetFirewallRule; " +
             $"New-NetFirewallRule -DisplayName '{safeName}' -Direction Inbound -Protocol TCP " +
             $"-LocalPort {_port.Value} -RemoteAddress {cidrs} -Profile Domain,Private -Action Allow | Out-Null";
