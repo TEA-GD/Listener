@@ -58,3 +58,16 @@ invalid ports. AgentIntegration tests configuration round-trip, legacy defaults,
 invalid input, actual TCP transmission using the DNS name localhost, deletion
 on matching ACK, and retention after rejection. Windows GUI interaction remains
 untested on this Linux host.
+
+## Listener_DB_GUI web project
+
+Added an independent ASP.NET Core/.NET 10 solution with a read-only SQLite API
+and a dependency-free browser UI. It lists PCs, shows per-PC aggregate counts,
+top processes/destinations/ports/types, UTC filters, paginated events and all
+fields in an event detail dialog. It defaults to localhost HTTP port 5080.
+
+The Release build and four dashboard test cases passed, including real HTTP
+queries, filters/pagination, missing/legacy schema errors, database immutability,
+and Chromium desktop/mobile UI navigation. Test data was synthetic. Windows
+build/launch scripts are provided; Windows execution itself was not tested on
+this Linux environment. This GUI does not start or repair the collector service.

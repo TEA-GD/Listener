@@ -253,3 +253,11 @@ Agent destination and ACK integration tests:
 ```powershell
 dotnet run --project tests/AgentIntegration -c Release
 ```
+
+## Database web dashboard
+
+[Listener_DB_GUI](Listener_DB_GUI/README.md) is a separate Visual Studio/.NET 10
+web project for viewing the collector database. It lists monitored PCs and
+provides per-PC statistics, filters, paginated events and a full event detail
+view. Build with `Listener_DB_GUI/Build-Windows.bat`, start with
+`Listener_DB_GUI/Start-Windows.bat`, then open `http://127.0.0.1:5080` locally.
