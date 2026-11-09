@@ -15,6 +15,7 @@
   <!-- Link the exact collector settings used by WatcherAgent so the UI never displays a stale address. -->
   <ItemGroup>
     <Compile Include="../WatcherAgent/CollectorSettings.cs" Link="CollectorSettings.cs" />
+    <Compile Include="../WatcherAgent/AgentConfig.cs" Link="AgentConfig.cs" />
   </ItemGroup>
   <!-- Create the embedded agent binary before MSBuild computes embedded resources. -->
   <Target Name="PrepareEmbeddedAgent" BeforeTargets="AssignTargetPaths"

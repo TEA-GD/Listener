@@ -11,12 +11,6 @@ using WatcherAgent;
 
 namespace WatcherInstaller;
 
-internal sealed class AgentConfig
-{
-    public string agent_id { get; set; } = "";
-    public string spool_dir { get; set; } = "";
-}
-
 internal static class Program
 {
     [STAThread]
@@ -37,6 +31,8 @@ internal sealed class InstallerForm : Form
     private const string TaskName = "Watcher-Connection-Agent";
 
     private readonly TextBox _agentId = new();
+    private readonly TextBox _collectorHost = new();
+    private readonly NumericUpDown _collectorPort = new();
     private readonly TextBox _log = new();
     private readonly Button _install = new();
     private readonly Button _uninstall = new();
@@ -58,20 +54,29 @@ internal sealed class InstallerForm : Form
         };
         Controls.Add(headline);
         Controls.Add(new Label {
-            Text = $"Collector (compiled into agent): {CollectorSettings.Host}:{CollectorSettings.Port}",
+            Text = "Collector domain name (DNS hostname) and TCP port",
             Location = new Point(20, 52), Size = new Size(620, 24)
         });
+        _collectorHost.SetBounds(20, 78, 460, 28);
+        _collectorHost.Text = CollectorSettings.Host;
+        _collectorHost.PlaceholderText = "collector.example.local";
+        Controls.Add(_collectorHost);
+        _collectorPort.SetBounds(494, 78, 150, 28);
+        _collectorPort.Minimum = 1;
+        _collectorPort.Maximum = 65535;
+        _collectorPort.Value = CollectorSettings.Port;
+        Controls.Add(_collectorPort);
         Controls.Add(new Label {
             Text = "Computer identity (automatic hostname, not authenticated)",
-            Location = new Point(20, 88), Size = new Size(620, 22)
+            Location = new Point(20, 116), Size = new Size(620, 22)
         });
-        _agentId.SetBounds(20, 110, 624, 28);
+        _agentId.SetBounds(20, 140, 624, 28);
         _agentId.Text = DiscoverFqdn();
         Controls.Add(_agentId);
 
         Controls.Add(new Label {
             Text = "Plain TCP mode: no TLS, no certificates, no tokens. Restrict collector access.",
-            Location = new Point(20, 160), Size = new Size(620, 44)
+            Location = new Point(20, 180), Size = new Size(620, 44)
         });
 
         Controls.Add(new Label {
@@ -82,7 +87,7 @@ internal sealed class InstallerForm : Form
         _log.ReadOnly = true;
         _log.ScrollBars = ScrollBars.Vertical;
         _log.Font = new Font("Consolas", 9F);
-        _log.Text = "Ready. No keys or tokens. Collector must run the matching PLAIN TCP version and allow this PC IP.";
+        _log.Text = "Ready. No keys or tokens. Collector must run the matching PLAIN TCP version and accept this connection.";
         Controls.Add(_log);
 
         _deleteData.Text = "Also delete local configuration and buffered unsent events (irreversible)";
@@ -105,6 +110,22 @@ internal sealed class InstallerForm : Form
         close.SetBounds(553, 537, 91, 36);
         Controls.Add(close);
         CancelButton = close;
+        string config = Path.Combine(DataDir, "agent.json");
+        if (File.Exists(config))
+        {
+            try
+            {
+                var saved = JsonSerializer.Deserialize<AgentConfig>(File.ReadAllText(config));
+                if (saved is not null)
+                {
+                    saved.ValidateCollector();
+                    _collectorHost.Text = saved.collector_host;
+                    _collectorPort.Value = saved.collector_port;
+                    _agentId.Text = saved.agent_id;
+                }
+            }
+            catch (Exception ex) { Log("Could not load previous settings: " + ex.Message); }
+        }
     }
 
     private async void InstallClicked(object? sender, EventArgs e)
@@ -117,20 +138,30 @@ internal sealed class InstallerForm : Form
             return;
         }
 
+        string collectorHost = _collectorHost.Text.Trim();
+        int collectorPort = (int)_collectorPort.Value;
+        try { new AgentConfig { collector_host = collectorHost, collector_port = collectorPort }.ValidateCollector(); }
+        catch (ArgumentException ex)
+        {
+            MessageBox.Show(this, ex.Message, "Watcher Setup", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
         _install.Enabled = false;
         _uninstall.Enabled = false;
         _deleteData.Enabled = false;
         _agentId.Enabled = false;
+        _collectorHost.Enabled = _collectorPort.Enabled = false;
         Log("Installing agent for " + id + " ...");
         try
         {
-            await Task.Run(() => Install(id, Log));
+            await Task.Run(() => Install(id, collectorHost, collectorPort, Log));
             Log("SUCCESS: Agent installed and startup task launched. No tokens are used.");
             MessageBox.Show(this,
                 "Watcher Agent installed.\n\n" +
                 "Windows task: " + TaskName + "\n" +
-                "Collector: " + CollectorSettings.Host + ":" + CollectorSettings.Port + "\n\n" +
-                "No token required. Verify the collector allows this machine IP and receives events.",
+                "Collector: " + collectorHost + ":" + collectorPort + "\n\n" +
+                "No token required. Verify the collector receives events.",
                 "Watcher Setup Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
@@ -145,6 +176,7 @@ internal sealed class InstallerForm : Form
             _uninstall.Enabled = true;
             _deleteData.Enabled = true;
             _agentId.Enabled = true;
+            _collectorHost.Enabled = _collectorPort.Enabled = true;
         }
     }
 
@@ -161,6 +193,7 @@ internal sealed class InstallerForm : Form
             return;
 
         _install.Enabled = _uninstall.Enabled = _deleteData.Enabled = _agentId.Enabled = false;
+        _collectorHost.Enabled = _collectorPort.Enabled = false;
         Log("Uninstalling agent..." + (deleteData ? " (including local data)" : " (preserving local data)"));
         try
         {
@@ -181,6 +214,7 @@ internal sealed class InstallerForm : Form
         finally
         {
             _install.Enabled = _uninstall.Enabled = _deleteData.Enabled = _agentId.Enabled = true;
+            _collectorHost.Enabled = _collectorPort.Enabled = true;
         }
     }
 
@@ -248,7 +282,7 @@ internal sealed class InstallerForm : Form
         _log.AppendText(Environment.NewLine + $"[{DateTime.Now:HH:mm:ss}] " + message);
     }
 
-    private static void Install(string agentId, Action<string> log)
+    private static void Install(string agentId, string collectorHost, int collectorPort, Action<string> log)
     {
         using var identity = WindowsIdentity.GetCurrent();
         if (!new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator))
@@ -291,7 +325,7 @@ internal sealed class InstallerForm : Form
         log("Installed agent binary to " + agentExe);
 
         string config = Path.Combine(DataDir, "agent.json");
-        var cfg = new AgentConfig { agent_id = agentId, spool_dir = spool };
+        var cfg = new AgentConfig { agent_id = agentId, spool_dir = spool, collector_host = collectorHost, collector_port = collectorPort };
         File.WriteAllText(config, JsonSerializer.Serialize(cfg, new JsonSerializerOptions { WriteIndented = true }),
             new UTF8Encoding(false));
         log("Wrote secured configuration: " + config);

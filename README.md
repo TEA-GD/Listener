@@ -38,18 +38,34 @@ An absent task/service and two `False` results indicate the installed components
 
 The source compiles with the .NET 10 SDK on Windows. The collector uses NuGet packages `Microsoft.Data.Sqlite` and `Microsoft.Extensions.Hosting.WindowsServices` for storage and service hosting. NuGet access (or configured offline cache) is needed at build time, but the published executables include the .NET runtime.
 
-## First: set the collector address ONCE before compiling the Agent
+## Set the collector domain name during agent installation
 
-Edit `Agent/src/WatcherAgent/CollectorSettings.cs`:
+The Windows agent installer has editable **Collector domain name** and **TCP port**
+fields. Enter a DNS name such as `collector.example.local` and port `6515`.
+Use the hostname alone, without `http://`, a path, or `:port` (the port has its
+own field). The agent uses normal OS DNS resolution when connecting. The DNS
+record must resolve to the collector PC from each agent machine.
 
-```csharp
-public const string Host = "watcher-collector.domain.local";
-public const int Port = 6515;
+The installer saves `collector_host` and `collector_port` in
+`C:\ProgramData\WatcherAgent\agent.json` and reloads them on the next update.
+No source edit or per-domain rebuild is required. The computer identity field
+identifies the monitored PC; it is separate from the collector destination.
+
+Example agent configuration (also supported on Linux):
+
+```json
+{
+  "agent_id": "workstation-01",
+  "spool_dir": "C:\\ProgramData\\WatcherAgent\\spool",
+  "collector_host": "collector.example.local",
+  "collector_port": 6515
+}
 ```
 
-Enter the DNS name or IP address where the collector will listen. The C# agent has no token, certificate or external collector-address setting: this constant is built into the EXE. All agents built from the same source will connect to that collector.
-
-The installer also shows the compiled address and automatically populates the agent hostname. The agent's `agent.json` only contains `agent_id` and local `spool_dir`.
+Older config files without the two collector fields still use the compiled
+`CollectorSettings` defaults. New installer builds are needed to get the new
+fields; then use Install / Update on existing agents. IP addresses remain
+supported as destinations.
 
 ## Build Windows installers
 
@@ -75,7 +91,7 @@ If MSBuild prompts to restore NuGet packages, allow restore on the development w
 1. On the Windows collector host, stop any old Python collector or V4 C# collector using port 6515. The V5 GUI installer can stop/reconfigure the existing `WatcherCollector` Windows service, but does not stop a separately launched Python collector.
 2. **Back up** `C:\ProgramData\WatcherCollector\watcher-events.db` (or your previous Python collector database) before the upgrade. Never run old and new collectors against the same SQLite database simultaneously.
 3. Run **`WatcherCollectorInstaller.exe`** as Administrator.
-4. Set `Listening port` to **6515** unless you compiled a different port into your agents.
+4. Set `Listening port` to **6515** and select the same port in the agent installer.
 5. Optionally set `Allowed agent IP networks` to the **source IP ranges of your agent machines**, e.g. `10.90.20.0/24,156.100.0.77/32` if those are the actual agent ranges. Leave the field blank to accept any sender on the selected port. If supplying CIDRs, do not use `0.0.0.0/0`.
 6. Click **Install / Update**. The installer writes `C:\ProgramData\WatcherCollector\collector.json`, installs `C:\Program Files\Watcher\Collector\WatcherCollector.exe`, creates `WatcherCollector` as an auto-start service, and adds an inbound Windows Firewall rule on Domain/Private profiles, restricted to the supplied CIDRs when present.
 
@@ -96,7 +112,7 @@ The CSV files use a `;` delimiter and are compatible with the earlier Watcher fi
 ## Install an agent (Windows)
 
 1. Run **`WatcherInstaller.exe`** as Administrator.
-2. Verify its precompiled collector DNS name/IP and port shown at the top.
+2. Enter the collector DNS hostname and TCP port at the top.
 3. Confirm the machine name/agent ID; click **Install / Update**. There are **no** token/certificate fields.
 4. It installs `C:\Program Files\Watcher\Agent\WatcherAgent.exe` and creates `C:\ProgramData\WatcherAgent\agent.json` and `spool\`.
 5. It registers a Windows scheduled task `Watcher-Connection-Agent` under the SYSTEM account.
@@ -132,7 +148,7 @@ sudo systemctl status watcher-agent
 sudo journalctl -u watcher-agent -n 50 --no-pager
 ```
 
-It automatically creates `/etc/watcher-agent/agent.json`, installs the agent, and enables the systemd service. No certificates, keys, tokens or enrollment step.
+It automatically creates `/etc/watcher-agent/agent.json`, installs the agent, and enables the systemd service. Set `collector_host` and `collector_port` in that file and run `sudo systemctl restart watcher-agent` to apply them. No certificates, keys, tokens or enrollment step.
 
 The Linux agent uses `ss` from `iproute2`, and should be run with appropriate privileges to see process names.
 
@@ -154,7 +170,7 @@ Test-NetConnection watcher-collector.domain.local -Port 6515
 & 'C:\Program Files\Watcher\Agent\WatcherAgent.exe' --once
 ```
 
-Replace the example host with your collector's actual compiled hostname.
+Replace the example host with your collector's actual configured hostname.
 
 ### Event protocol
 
@@ -231,3 +247,9 @@ listening on a port does not discover agents or capture unrelated network traffi
 This remains the Watcher JSON-line TCP protocol. With no sender filter, any sender
 that can reach the port can submit events; the transport has no authentication
 or encryption. Use a trusted network or protected VPN.
+
+Agent destination and ACK integration tests:
+
+```powershell
+dotnet run --project tests/AgentIntegration -c Release
+```

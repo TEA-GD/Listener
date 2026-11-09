@@ -50,7 +50,7 @@ internal sealed class SetupForm : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         AddLabel("Install Watcher Collector (plain TCP — no certificates or tokens)", 20, 20, bold: true);
-        AddLabel("Collector DNS name (informational; set target in Agent/CollectorSettings.cs)", 20, 64);
+        AddLabel("Collector DNS name (informational; enter this name in the agent installer)", 20, 64);
         _host.SetBounds(20, 88, 716, 27);
         _host.Text = Environment.MachineName;
         _host.ReadOnly = true;

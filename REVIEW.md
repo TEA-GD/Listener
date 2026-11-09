@@ -14,7 +14,7 @@ Windows GUI installers embed the application binaries. The collector runs as a W
 
 ## Deployment requirements and limitations
 
-- Change `Agent/src/WatcherAgent/CollectorSettings.cs` from `watcher-collector.domain.local` to your actual collector address before building agents. No deployment address was guessed during review.
+- Enter the collector DNS hostname and port in the agent installer. These settings are saved in agent.json; older configurations fall back to CollectorSettings defaults.
 - Transport is plaintext and unauthenticated. The CIDR filter is not host authentication. Restrict access to a trusted management network or protected VPN; do not expose port 6515 publicly.
 - Connections shorter than the polling interval can be missed. Disconnection means absence from the next snapshot, not observation of TCP FIN/RST.
 - `--once` catches collection/transmission failures and can exit successfully despite them. Inspect logs and collector storage to confirm delivery.
@@ -49,3 +49,12 @@ any reachable sender; supplied CIDRs continue to filter clients. Default binding
 is all IPv4 interfaces. Live loopback integration tests exercise a port-only
 heartbeat, matching ACK and database record, and rejection with a nonmatching
 CIDR list. Windows firewall installation remains a deployment-target check.
+
+## Configurable agent destination
+
+The agent installer now accepts and persists the collector DNS hostname and TCP
+port. Settings reload during updates; runtime validation rejects URLs/paths and
+invalid ports. AgentIntegration tests configuration round-trip, legacy defaults,
+invalid input, actual TCP transmission using the DNS name localhost, deletion
+on matching ACK, and retention after rejection. Windows GUI interaction remains
+untested on this Linux host.

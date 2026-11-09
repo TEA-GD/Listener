@@ -1,8 +1,8 @@
 namespace WatcherAgent;
 
 /// <summary>
-/// IMPORTANT: Change the address ONCE before compiling. All installed agents
-/// from this build will connect to this central Watcher collector.
+/// Default endpoint for older configuration files. The installer writes
+/// collector_host and collector_port to agent.json to override these defaults.
 /// No authentication tokens are used. All data is sent in cleartext. Restrict collector access by firewall and IP allowlist.
 /// </summary>
 internal static class CollectorSettings

@@ -8,12 +8,6 @@ using System.Text.RegularExpressions;
 
 namespace WatcherAgent;
 
-internal sealed class AgentConfig
-{
-    public string agent_id { get; set; } = "";
-    public string spool_dir { get; set; } = "";
-}
-
 internal sealed record Connection(string LocalIP, int LocalPort, string RemoteIP,
                                   int RemotePort, int PID, string Process, string Software)
 {
@@ -58,8 +52,9 @@ internal static class Program
                 throw new InvalidOperationException("Invalid agent_id; must contain only letters, digits, dots, underscores or hyphens.");
             if (string.IsNullOrWhiteSpace(cfg.spool_dir))
                 throw new InvalidOperationException("spool_dir is required.");
+            cfg.ValidateCollector();
             Directory.CreateDirectory(cfg.spool_dir);
-            Console.WriteLine($"WatcherAgent {cfg.agent_id} -> {CollectorSettings.Host}:{CollectorSettings.Port}");
+            Console.WriteLine($"WatcherAgent {cfg.agent_id} -> {cfg.collector_host}:{cfg.collector_port}");
             Run(cfg, once);
             return 0;
         }
@@ -282,7 +277,7 @@ internal static class Program
         Array.Sort(files, StringComparer.Ordinal);
         if (files.Length == 0) return 0;
         using var tcp = new TcpClient();
-        tcp.ConnectAsync(CollectorSettings.Host, CollectorSettings.Port)
+        tcp.ConnectAsync(cfg.collector_host, cfg.collector_port)
            .WaitAsync(TimeSpan.FromSeconds(8)).GetAwaiter().GetResult();
         tcp.ReceiveTimeout = 10000;
         tcp.SendTimeout = 10000;
