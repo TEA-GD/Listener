@@ -261,3 +261,11 @@ web project for viewing the collector database. It lists monitored PCs and
 provides per-PC statistics, filters, paginated events and a full event detail
 view. Build with `Listener_DB_GUI/Build-Windows.bat`, start with
 `Listener_DB_GUI/Start-Windows.bat`, then open `http://127.0.0.1:5080` locally.
+
+## Lightweight agent for servers and domain controllers
+
+[ServerAgent](ServerAgent/README.md) provides a standalone Windows PowerShell
+TCP metadata agent and startup-task helper. It needs no GUI installer or package.
+Run `Register-ServerAgentTask.ps1 -CollectorHost collector.example.local` as
+Administrator to register and start `Watcher-Server-Agent` under SYSTEM after
+every reboot. Events use the existing collector/database/dashboard format.

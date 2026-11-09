@@ -71,3 +71,13 @@ queries, filters/pagination, missing/legacy schema errors, database immutability
 and Chromium desktop/mobile UI navigation. Test data was synthetic. Windows
 build/launch scripts are provided; Windows execution itself was not tested on
 this Linux environment. This GUI does not start or repair the collector service.
+
+## Lightweight ServerAgent module
+
+Added a PowerShell 5.1-targeted TCP metadata agent for Windows servers/DCs and
+helpers to register/remove a SYSTEM startup task. This is independent of the GUI
+agent; it buffers events, requires matching ACKs, preserves unsent data and uses
+the existing collector protocol. Scope is TCP metadata only, not Event Logs.
+Testing uses PowerShell 7 and mocked Windows TCP/CIM calls against the real C#
+collector with temporary SQLite/CSV storage. Windows 5.1 execution, Task Scheduler
+registration and reboot behavior still require a Windows target check.
