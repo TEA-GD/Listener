@@ -173,3 +173,42 @@ These are **source files**, not compiled executables. If your machine has the .N
 ## Source review
 
 See [REVIEW.md](REVIEW.md) for architecture, deployment limitations, and the build/test results recorded when importing this source into TEA-GD/Listener.
+
+## SQLite columns and upgrading existing databases
+
+The collector now stores each of the 19 standard event fields in a separate
+column of `events`: `EVENT_ID`, `EVENT_TYPE`, `TIMESTAMP_UTC`, `DATE_AND_TIME`,
+`SOURCE_IP`, `SOURCE_DOMAIN_NAME`, `PROCESS_NAME`, `PROCESS_ID`, `RECIEVER_IP`,
+`RECIEVER_DOMAINNAME`, `PORT_USED`, `SOFTWARE_THAT_USED`, `SOURCE_PORT`, `PROTOCOL`,
+`STATE`, `OPERATING_SYSTEM`, `MONITORED_HOST`, `SNAPSHOT_ID`, and `COLLECTOR_PEER_IP`.
+The original `RECIEVER` spelling is retained for compatibility. Values are TEXT,
+matching the agent protocol; absent optional values become empty strings.
+`EVENT_ID` is the primary key. Internal `host`, `date_utc`, and `received_utc`
+columns support export grouping and receipt tracking. `COLLECTOR_PEER_IP` always
+comes from the TCP connection, never from the sender's claim.
+
+On startup, legacy `payload_json` records are migrated into these columns and the
+JSON column is removed. Existing IDs, timestamps, receipt times and export state
+are preserved. Invalid legacy JSON aborts migration without replacing the old
+table. Unknown, nonstandard JSON properties are not retained in the new schema.
+
+Before upgrading, stop the collector and back up its SQLite database (including
+any WAL/SHM sidecars). Rebuild and install/update the collector, then start it;
+the installer configuration check also triggers migration. Agents do not need
+rebuilding for this database-only change. Keep the backup if you need to roll
+back to an older collector, which expects `payload_json`.
+
+Example query:
+
+```sql
+SELECT EVENT_ID, EVENT_TYPE, TIMESTAMP_UTC, SOURCE_IP, RECIEVER_IP,
+       PORT_USED, PROCESS_NAME, MONITORED_HOST, COLLECTOR_PEER_IP
+FROM events
+ORDER BY TIMESTAMP_UTC DESC;
+```
+
+Run the database integration checks with .NET 10:
+
+```powershell
+dotnet run --project tests/DatabaseIntegration -c Release
+```

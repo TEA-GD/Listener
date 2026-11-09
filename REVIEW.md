@@ -30,3 +30,14 @@ Windows GUI installers embed the application binaries. The collector runs as a W
 - Windows GUI, service/task registration, uninstall behavior, Debian package installation, and live collector/agent ACK + SQLite/CSV integration were not executed. These remain deployment-target checks.
 
 Application source from the upload is unchanged. Added `.gitignore`, this review, and a README link; marked the Linux build script executable. Generated build artifacts and temporary test data are excluded from Git.
+
+## Subsequent database-column update
+
+The collector storage implementation now uses individual event columns and an
+atomic migration from the original JSON schema; the original import's statement
+that application sources were unchanged describes only that initial import.
+DatabaseIntegration exercises the actual collector database methods and verifies
+fresh storage, legacy backfill, repeated initialization, event deduplication,
+trusted peer IP, CSV escaping/export state, and rollback for malformed legacy
+JSON. These database checks pass on Linux; Windows installation and live network
+integration remain deployment-target checks.

@@ -309,17 +309,44 @@ internal static class Database
     public static void Initialize(string path)
     {
         using var db = Connect(path);
+        using (var wal = db.CreateCommand())
+        {
+            wal.CommandText = "PRAGMA journal_mode=WAL;";
+            wal.ExecuteNonQuery();
+        }
+        using var transaction = db.BeginTransaction();
         using var c = db.CreateCommand();
+        c.Transaction = transaction;
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        c.CommandText = "PRAGMA table_info(events)";
+        using (var reader = c.ExecuteReader())
+            while (reader.Read()) columns.Add(reader.GetString(1));
+
+        // Rebuild legacy JSON storage atomically; a failure rolls back the whole migration.
+        bool legacy = columns.Contains("payload_json");
+        string table = legacy ? "events_columns" : "events";
+        c.CommandText = $"CREATE TABLE IF NOT EXISTS {table} (" +
+            string.Join(",", CsvFields.Select(f => $"[{f}] TEXT " +
+                (f == "EVENT_ID" ? "PRIMARY KEY NOT NULL" : "NOT NULL DEFAULT ''"))) +
+            ",host TEXT NOT NULL,date_utc TEXT NOT NULL,received_utc TEXT NOT NULL)";
+        c.ExecuteNonQuery();
+        if (legacy)
+        {
+            string LegacyValue(string field) => field switch
+            {
+                "EVENT_ID" => "event_id",
+                "TIMESTAMP_UTC" => "timestamp_utc",
+                "MONITORED_HOST" => "host",
+                _ => $"COALESCE(CAST(json_extract(payload_json, '$.{field}') AS TEXT),'')"
+            };
+            c.CommandText = "INSERT INTO events_columns (" +
+                string.Join(",", CsvFields.Select(f => $"[{f}]")) + ",host,date_utc,received_utc) SELECT " +
+                string.Join(",", CsvFields.Select(LegacyValue)) + ",host,date_utc,received_utc FROM events";
+            c.ExecuteNonQuery();
+            c.CommandText = "DROP TABLE events; ALTER TABLE events_columns RENAME TO events;";
+            c.ExecuteNonQuery();
+        }
         c.CommandText = """
-            PRAGMA journal_mode=WAL;
-            CREATE TABLE IF NOT EXISTS events (
-                event_id TEXT PRIMARY KEY,
-                host TEXT NOT NULL,
-                date_utc TEXT NOT NULL,
-                timestamp_utc TEXT NOT NULL,
-                payload_json TEXT NOT NULL,
-                received_utc TEXT NOT NULL
-            );
             CREATE INDEX IF NOT EXISTS idx_events_host_date ON events(host,date_utc,timestamp_utc);
             CREATE TABLE IF NOT EXISTS dirty (
                 host TEXT NOT NULL,
@@ -329,6 +356,7 @@ internal static class Database
             );
             """;
         c.ExecuteNonQuery();
+        transaction.Commit();
     }
     public static string Store(string path, JsonElement envelope, string peerIp)
     {
@@ -357,17 +385,20 @@ internal static class Database
         var trusted = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach (var property in row.EnumerateObject()) trusted[property.Name] = property.Value.Clone();
         trusted["COLLECTOR_PEER_IP"] = peerIp; // ALWAYS overwrite agent-supplied peer IP.
-        string payload = JsonSerializer.Serialize(trusted);
         using var db = Connect(path);
         using var transaction = db.BeginTransaction();
         using var insert = db.CreateCommand();
         insert.Transaction = transaction;
-        insert.CommandText = "INSERT OR IGNORE INTO events(event_id,host,date_utc,timestamp_utc,payload_json,received_utc) VALUES ($id,$host,$day,$stamp,$json,$now)";
-        insert.Parameters.AddWithValue("$id", eventId);
+        insert.CommandText = "INSERT OR IGNORE INTO events(" +
+            string.Join(",", CsvFields.Select(f => $"[{f}]")) + ",host,date_utc,received_utc) VALUES (" +
+            string.Join(",", CsvFields.Select((_, i) => "$f" + i)) + ",$host,$day,$now)";
+        for (int i = 0; i < CsvFields.Length; i++)
+        {
+            trusted.TryGetValue(CsvFields[i], out var value);
+            insert.Parameters.AddWithValue("$f" + i, value?.ToString() ?? "");
+        }
         insert.Parameters.AddWithValue("$host", host);
         insert.Parameters.AddWithValue("$day", day);
-        insert.Parameters.AddWithValue("$stamp", timestamp);
-        insert.Parameters.AddWithValue("$json", payload);
         insert.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
         int inserted = insert.ExecuteNonQuery();
         if (inserted > 0)
@@ -395,15 +426,17 @@ internal static class Database
         }
         foreach (var (host, day, generation) in pending)
         {
-            var rows = new List<string>();
+            var rows = new List<string[]>();
             using (var db = Connect(path))
             using (var cmd = db.CreateCommand())
             {
-                cmd.CommandText = "SELECT payload_json FROM events WHERE host=$host AND date_utc=$day ORDER BY timestamp_utc,event_id";
+                cmd.CommandText = "SELECT " + string.Join(",", CsvFields.Select(f => $"[{f}]")) +
+                    " FROM events WHERE host=$host AND date_utc=$day ORDER BY timestamp_utc,event_id";
                 cmd.Parameters.AddWithValue("$host", host);
                 cmd.Parameters.AddWithValue("$day", day);
                 using var reader = cmd.ExecuteReader();
-                while (reader.Read()) rows.Add(reader.GetString(0));
+                while (reader.Read())
+                    rows.Add(Enumerable.Range(0, CsvFields.Length).Select(reader.GetString).ToArray());
             }
             string folder = Path.Combine(csvDir, host);
             Directory.CreateDirectory(folder);
@@ -414,16 +447,8 @@ internal static class Database
                 using (var writer = new StreamWriter(temp, false, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true)))
                 {
                     writer.WriteLine(string.Join(";", CsvFields.Select(Quote)));
-                    foreach (var payload in rows)
-                    {
-                        using var json = JsonDocument.Parse(payload);
-                        writer.WriteLine(string.Join(";", CsvFields.Select(field =>
-                        {
-                            if (!json.RootElement.TryGetProperty(field, out var value) || value.ValueKind == JsonValueKind.Null)
-                                return Quote("");
-                            return Quote(value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : value.ToString());
-                        })));
-                    }
+                    foreach (var row in rows)
+                        writer.WriteLine(string.Join(";", row.Select(Quote)));
                     writer.Flush();
                     ((FileStream)writer.BaseStream).Flush(flushToDisk: true);
                 }
