@@ -60,6 +60,13 @@ app.MapGet("/api/pc", (HttpRequest request, ViewerDatabase database) => {
         where += " AND (instr(lower(PROCESS_NAME),lower($q))>0 OR instr(SOURCE_IP,$q)>0 OR instr(RECIEVER_IP,$q)>0 OR instr(PORT_USED,$q)>0 OR instr(EVENT_ID,$q)>0)";
     }
     if (type.Length > 0) { parameters["$type"] = type; where += " AND EVENT_TYPE=$type"; }
+    string destination = request.Query["destination"].ToString();
+    if (destination.Length > 0) {
+        if (destination.Length > 64 || !System.Net.IPAddress.TryParse(destination, out _))
+            throw new ArgumentException("Destination filter must be an IP address.");
+        parameters["$destination"] = destination;
+        where += " AND RECIEVER_IP=$destination";
+    }
     using var db = database.Open();
     var stats = ViewerDatabase.Query(db, """
         SELECT COUNT(*) AS events, COUNT(DISTINCT NULLIF(PROCESS_NAME,'')) AS processes,
@@ -77,11 +84,66 @@ app.MapGet("/api/pc", (HttpRequest request, ViewerDatabase database) => {
         " ORDER BY TIMESTAMP_UTC DESC,EVENT_ID LIMIT $limit OFFSET $offset", paging);
     return Results.Ok(new { host, page, size, stats, groups, events });
 });
+app.MapGet("/api/connections", (HttpRequest request, ViewerDatabase database) => {
+    string host = request.Query["host"].ToString();
+    if (string.IsNullOrWhiteSpace(host) || host.Length > 120) throw new ArgumentException("Choose a valid PC.");
+    string day = request.Query["day"].ToString();
+    if (day.Length == 0) day = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    if (!DateOnly.TryParseExact(day, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+        throw new ArgumentException("Day must use yyyy-MM-dd (UTC).");
+    int gapDays = ParseNumber(request.Query["gapDays"].ToString(), 30, 1, 36500);
+    int page = ParseNumber(request.Query["page"].ToString(), 1, 1, 1000000);
+    const int size = 50;
+    var parameters = new Dictionary<string, object> { ["$host"] = host, ["$day"] = day, ["$gap"] = gapDays };
+    using var db = database.Open();
+    // Compare against event time, never receipt order. Disconnects also prove prior
+    // observation, but only a connected/startup event can create a candidate today.
+    const string candidates = """
+        WITH today AS (
+            SELECT RECIEVER_IP AS ip, MIN(julianday(TIMESTAMP_UTC)) AS firstSeen,
+                MAX(julianday(TIMESTAMP_UTC)) AS lastSeen, COUNT(*) AS observations,
+                group_concat(DISTINCT NULLIF(PORT_USED,'')) AS ports,
+                group_concat(DISTINCT NULLIF(PROCESS_NAME,'')) AS processes
+            FROM events
+            WHERE host=$host AND date_utc=$day AND RECIEVER_IP<>''
+              AND EVENT_TYPE IN ('TCP_CONNECTED','ACTIVE_AT_START')
+            GROUP BY RECIEVER_IP
+        ), prior AS (
+            SELECT history.RECIEVER_IP AS ip, MAX(julianday(history.TIMESTAMP_UTC)) AS previousSeen
+            FROM events AS history JOIN today ON history.RECIEVER_IP=today.ip
+            WHERE history.host=$host AND history.date_utc<=$day
+              AND history.EVENT_TYPE IN ('TCP_CONNECTED','ACTIVE_AT_START','TCP_DISCONNECTED')
+              AND julianday(history.TIMESTAMP_UTC)<today.firstSeen
+            GROUP BY history.RECIEVER_IP
+        ), compared AS (
+            SELECT today.*, prior.previousSeen FROM today LEFT JOIN prior ON today.ip=prior.ip
+        ), flagged AS (
+            SELECT *, CASE WHEN previousSeen IS NULL THEN 'new' ELSE 'returned' END AS classification
+            FROM compared WHERE previousSeen IS NULL OR firstSeen>=previousSeen+$gap
+        )
+        """;
+    var summary = ViewerDatabase.Query(db, candidates + """
+        SELECT COUNT(*) AS total,
+            COUNT(CASE WHEN classification='new' THEN 1 END) AS newDestinations,
+            COUNT(CASE WHEN classification='returned' THEN 1 END) AS returnedDestinations
+        FROM flagged
+        """, parameters)[0];
+    parameters["$limit"] = size;
+    parameters["$offset"] = (page - 1) * size;
+    var destinations = ViewerDatabase.Query(db, candidates + """
+        SELECT ip,classification,strftime('%Y-%m-%dT%H:%M:%fZ',firstSeen) AS firstSeen,
+            strftime('%Y-%m-%dT%H:%M:%fZ',lastSeen) AS lastSeen,
+            strftime('%Y-%m-%dT%H:%M:%fZ',previousSeen) AS previousSeen,
+            round(firstSeen-previousSeen,2) AS gapDays,observations,ports,processes
+        FROM flagged ORDER BY classification,firstSeen,ip LIMIT $limit OFFSET $offset
+        """, parameters);
+    return Results.Ok(new { host, day, gapDays, page, size, summary, destinations });
+});
 app.Run();
 
 static int ParseNumber(string value, int fallback, int min, int max) {
     if (value.Length == 0) return fallback;
-    if (!int.TryParse(value, out int number) || number < min || number > max) throw new ArgumentException("Invalid page or page size.");
+    if (!int.TryParse(value, out int number) || number < min || number > max) throw new ArgumentException("Invalid numeric parameter (page, size or gap days).");
     return number;
 }
 

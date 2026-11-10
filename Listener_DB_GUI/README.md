@@ -97,3 +97,36 @@ when available; `PLAYWRIGHT_CHROMIUM_EXECUTABLE` can select another compatible
 browser binary. Tests create temporary synthetic databases, run the real HTTP
 server, verify filters/counts/pagination, error handling and unchanged database
 contents, and navigate the UI in Chromium. They never use production data.
+
+## New & rare connections board
+
+Select a PC, then use **New & rare connections**. Choose a UTC day and a minimum
+absence threshold (default 30 days; configurable from 1 to 36,500). The initial
+day follows the selected PC's latest stored event. The board is independent of
+the event-history filters above it.
+
+Each row is a unique destination IP for that PC/day, across ports and processes:
+
+- **New in history**: no earlier observation of this IP is stored for this PC.
+- **Returned after gap**: the first positive observation that day occurred at
+  least the configured number of elapsed 24-hour days after its last earlier
+  observation. The displayed gap is rounded; classification uses the unrounded
+  timestamps. Exactly 30 days qualifies for a 30-day threshold.
+
+Candidates come from `TCP_CONNECTED` and `ACTIVE_AT_START` events. Earlier
+`TCP_DISCONNECTED` events also count as evidence of prior observation, so a
+recently observed disconnect prevents a false long-gap classification. Heartbeat
+and disconnect-only destinations do not create candidates. Multiple observations
+on the selected day do not erase the first observation's classification. Future
+events and another PC's history do not affect it. Arrival order is ignored;
+comparison uses event timestamps in UTC.
+
+The board shows first/previous observations, gap, ports, processes and positive
+observation counts, with 50 destinations per page. **Show events** sets the
+history's exact destination-IP filter and UTC day, including any disconnects.
+
+Results describe **retained observed history**, not proof of previously absent
+network traffic, malicious behavior or continuous inactivity. New deployments,
+data deletion, agent downtime, long-lived connections between snapshots, and
+incorrect endpoint clocks can affect classifications. No persistent alert state
+or database writes are created; results are recomputed on refresh.

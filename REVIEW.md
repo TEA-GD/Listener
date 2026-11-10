@@ -81,3 +81,13 @@ the existing collector protocol. Scope is TCP metadata only, not Event Logs.
 Testing uses PowerShell 7 and mocked Windows TCP/CIM calls against the real C#
 collector with temporary SQLite/CSV storage. Windows 5.1 execution, Task Scheduler
 registration and reboot behavior still require a Windows target check.
+
+## New & rare connections board
+
+Added a per-PC/day destination-IP board with new-in-history and returned-after-gap
+classifications (default 30 elapsed days). Positive connection/startup events
+create candidates; prior disconnects also provide history evidence. The API uses
+parameterized queries against retained history and remains read-only. Tests cover
+cross-PC isolation, future records, repeated same-day observations, recent and
+long-gap history, exact threshold boundaries, disconnect/heartbeat exclusions,
+IPv6, pagination, input validation and browser drill-down with an exact IP filter.

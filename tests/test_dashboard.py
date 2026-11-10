@@ -30,6 +30,34 @@ class Dashboard(unittest.TestCase):
                 db.execute('INSERT INTO events VALUES(' + ','.join('?' for _ in range(len(FIELDS)+3)) + ')', [row[f] for f in FIELDS] + ['PC-01','2026-11-09','2026-11-09T09:00:01Z'])
             row['EVENT_ID']='other'; row['MONITORED_HOST']='PC-02<script>'
             db.execute('INSERT INTO events VALUES(' + ','.join('?' for _ in range(len(FIELDS)+3)) + ')', [row[f] for f in FIELDS] + ['PC-02<script>','2026-11-09','2026-11-09T09:00:01Z'])
+        with sqlite3.connect(cls.db) as db:
+            counter=0
+            def add(ip,stamp,kind='TCP_CONNECTED',pc='Rare-PC',port='443',process='worker.exe'):
+                nonlocal counter
+                counter+=1
+                row=dict.fromkeys(FIELDS,'')
+                row.update(EVENT_ID=f'rare-{counter}',EVENT_TYPE=kind,TIMESTAMP_UTC=stamp,
+                    MONITORED_HOST=pc,RECIEVER_IP=ip,PORT_USED=port,PROCESS_NAME=process)
+                db.execute('INSERT INTO events VALUES('+','.join('?' for _ in range(len(FIELDS)+3))+')',
+                    [row[f] for f in FIELDS]+[pc,stamp[:10],stamp])
+            add('203.0.113.20','2026-11-09T09:00:00Z')
+            add('203.0.113.20','2026-11-09T10:00:00Z','ACTIVE_AT_START',port='8443',process='second.exe')
+            add('203.0.113.20','2026-11-10T10:00:00Z') # future cannot influence the selected day
+            add('203.0.113.20','2026-01-01T10:00:00Z',pc='PC-02<script>') # history is per PC
+            add('203.0.113.21','2026-11-09T09:00:00Z')
+            add('203.0.113.21','2026-09-01T09:00:00Z')
+            add('203.0.113.21','2026-10-01T09:00:00Z','TCP_DISCONNECTED')
+            add('203.0.113.22','2026-11-08T09:00:00Z')
+            add('203.0.113.22','2026-11-09T09:00:00Z')
+            add('203.0.113.23','2026-10-10T09:00:00+00:00')
+            add('203.0.113.23','2026-11-09T09:00:00Z') # exactly 30 days
+            add('203.0.113.24','2026-11-09T09:00:00Z','TCP_DISCONNECTED')
+            add('203.0.113.25','2026-11-09T09:00:00Z','HEARTBEAT')
+            add('','2026-11-09T09:00:00Z')
+            add('203.0.113.26','2026-11-09T08:00:00Z','TCP_DISCONNECTED')
+            add('203.0.113.26','2026-11-09T09:00:00Z')
+            add('2001:db8::1','2026-11-09T09:00:00Z')
+            for n in range(55):add(f'10.20.0.{n+1}','2026-11-09T09:00:00Z')
         cls.original = hashlib.sha256(cls.db.read_bytes()).hexdigest()
         cls.processes=[]
         cls.url=cls.start(cls.db)
@@ -66,7 +94,7 @@ class Dashboard(unittest.TestCase):
         with urllib.request.urlopen(self.url+path) as r: return json.load(r)
 
     def test_queries_filters_pagination(self):
-        self.assertEqual(2,len(self.request('/api/pcs')))
+        self.assertEqual(3,len(self.request('/api/pcs')))
         d=self.request('/api/pc?host=PC-01')
         self.assertEqual(121,d['stats']['events']); self.assertEqual(60,d['stats']['connections'])
         self.assertEqual(50,len(d['events'])); self.assertTrue(set(FIELDS)<=set(d['events'][0]))
@@ -98,6 +126,33 @@ class Dashboard(unittest.TestCase):
         self.assertEqual(405,e.exception.code)
         self.assertEqual(self.original,hashlib.sha256(self.db.read_bytes()).hexdigest())
 
+    def test_new_and_rare_connections(self):
+        query='/api/connections?host=Rare-PC&day=2026-11-09'
+        first=self.request(query);second=self.request(query+'&page=2')
+        self.assertEqual({'total':59,'newDestinations':57,'returnedDestinations':2},first['summary'])
+        self.assertEqual(50,len(first['destinations']));self.assertEqual(9,len(second['destinations']))
+        rows={r['ip']:r for r in first['destinations']+second['destinations']}
+        self.assertEqual(59,len(rows))
+        self.assertEqual('new',rows['203.0.113.20']['classification'])
+        self.assertIsNone(rows['203.0.113.20']['previousSeen'])
+        self.assertEqual(2,rows['203.0.113.20']['observations'])
+        self.assertEqual({'443','8443'},set(rows['203.0.113.20']['ports'].split(',')))
+        self.assertEqual(39,rows['203.0.113.21']['gapDays'])
+        self.assertEqual('2026-10-01T09:00:00.000Z',rows['203.0.113.21']['previousSeen'])
+        self.assertEqual(30,rows['203.0.113.23']['gapDays'])
+        for ip in ['203.0.113.22','203.0.113.24','203.0.113.25','203.0.113.26','']:
+            self.assertNotIn(ip,rows)
+        self.assertEqual(0,self.request(query+'&gapDays=60')['summary']['returnedDestinations'])
+        self.assertEqual(0,self.request('/api/connections?host=Rare-PC&day=2026-12-01')['summary']['total'])
+        self.assertEqual(0,self.request('/api/connections?host='+urllib.parse.quote("x' OR 1=1--")+'&day=2026-11-09')['summary']['total'])
+        for suffix in ['&day=bad','&gapDays=0','&gapDays=36501','&page=-1']:
+            with self.assertRaises(urllib.error.HTTPError) as e:self.request('/api/connections?host=Rare-PC'+suffix)
+            self.assertEqual(400,e.exception.code)
+        with self.assertRaises(urllib.error.HTTPError) as e:self.request('/api/connections?day=2026-11-09')
+        self.assertEqual(400,e.exception.code)
+        self.assertEqual(2,self.request('/api/pc?host=Rare-PC&destination=203.0.113.20&from=2026-11-09&to=2026-11-09')['stats']['events'])
+        self.assertEqual(self.original,hashlib.sha256(self.db.read_bytes()).hexdigest())
+
     def test_browser(self):
         from playwright.sync_api import sync_playwright, expect
         with sync_playwright() as p:
@@ -107,6 +162,10 @@ class Dashboard(unittest.TestCase):
             page.goto(self.url)
             page.get_by_role('button',name='PC-01',exact=False).click()
             expect(page.locator("#resultCount")).to_have_text("121 matching events")
+            expect(page.locator('#connectionSummary')).to_have_text('1 new · 0 returned')
+            page.get_by_role('button',name='Show events for 203.0.113.1',exact=True).click()
+            expect(page.locator('#destination')).to_have_value('203.0.113.1')
+
             page.get_by_role('button',name='Next',exact=True).click()
             expect(page.locator("#page")).to_have_text("Page 2 of 3")
             page.get_by_role('button',name='View event event-',exact=False).first.click()
@@ -122,6 +181,17 @@ class Dashboard(unittest.TestCase):
             self.assertEqual([],errors)
             page.set_viewport_size({'width':390,'height':844})
             self.assertTrue(page.locator('#pcSearch').is_visible())
+
+            page.get_by_role('button',name='Rare-PC',exact=False).click()
+            page.locator('#connectionDay').fill('2026-11-09')
+            page.get_by_role('button',name='Check connections',exact=True).click()
+            expect(page.locator('#connectionSummary')).to_have_text('57 new · 2 returned')
+            page.get_by_role('button',name='Next connections',exact=True).click()
+            expect(page.locator('#connectionPage')).to_have_text('Page 2 of 2')
+            page.locator('#connectionGap').fill('60')
+            page.get_by_role('button',name='Check connections',exact=True).click()
+            expect(page.locator('#connectionSummary')).to_have_text('57 new · 0 returned')
+            self.assertEqual([],errors)
             browser.close()
 
 if __name__=='__main__': unittest.main(verbosity=2)
