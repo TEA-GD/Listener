@@ -91,3 +91,16 @@ parameterized queries against retained history and remains read-only. Tests cove
 cross-PC isolation, future records, repeated same-day observations, recent and
 long-gap history, exact threshold boundaries, disconnect/heartbeat exclusions,
 IPv6, pagination, input validation and browser drill-down with an exact IP filter.
+
+## Linux package dependency correction
+
+The package builder now selects runtime dependencies for Debian 12 versus 13
+instead of always requiring libicu72/libssl3. Package version is 1.0.1. It rejects
+unsupported build platforms before publishing and creates staging directories
+with explicit 0755 permissions, including with a restrictive caller umask.
+On Debian 13, package creation and APT installation simulation passed. Tests
+verified package contents, maintainer-script syntax and actual execution of the
+extracted self-contained agent with heartbeat delivery/ACK cleanup. No system
+package was installed during validation; systemd boot/start validation remains a
+target-server check. Debian 12 dependency mapping is retained but was not built
+on a Debian 12 host in this check.

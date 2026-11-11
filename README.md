@@ -33,7 +33,7 @@ An absent task/service and two `False` results indicate the installed components
 - `Agent/Watcher-Compiled-Installer.sln` — native C# Windows/Linux agent + graphical Windows agent installer.
 - `Collector/build/build-windows.ps1` — publishes a self-contained collector EXE, then embeds it in a self-contained GUI installer EXE.
 - `Agent/build/build-windows.ps1` — builds a self-contained GUI agent installer embedding the agent EXE.
-- `Agent/build/build-linux.sh` — creates a Debian 12 amd64 `.deb` (requires .NET 10 SDK, `dpkg-deb`).
+- `Agent/build/build-linux.sh` — creates a Debian 12/13 amd64 `.deb` (requires .NET 10 SDK, `dpkg-deb`).
 - `build-windows-all.ps1` — publishes both Windows installer EXEs.
 
 The source compiles with the .NET 10 SDK on Windows. The collector uses NuGet packages `Microsoft.Data.Sqlite` and `Microsoft.Extensions.Hosting.WindowsServices` for storage and service hosting. NuGet access (or configured offline cache) is needed at build time, but the published executables include the .NET runtime.
@@ -133,17 +133,17 @@ The user must allow outbound TCP traffic from the agent machine to the collector
 
 ## Install an agent (Linux)
 
-On a Debian 12 amd64 build machine with .NET 10 SDK, run:
+On a Debian 12 or 13 amd64 build machine with .NET 10 SDK, run (use the same Debian release as the target server):
 
 ```bash
 cd Agent
 ./build/build-linux.sh
 ```
 
-The package will be written to `Agent/output/watcher-agent_1.0.0_amd64.deb`. On the target Linux machine:
+The package will be written to `Agent/output/watcher-agent_1.0.1_amd64.deb`. On the target Linux machine:
 
 ```bash
-sudo apt install ./watcher-agent_1.0.0_amd64.deb
+sudo apt install ./watcher-agent_1.0.1_amd64.deb
 sudo systemctl status watcher-agent
 sudo journalctl -u watcher-agent -n 50 --no-pager
 ```
@@ -151,6 +151,8 @@ sudo journalctl -u watcher-agent -n 50 --no-pager
 It automatically creates `/etc/watcher-agent/agent.json`, installs the agent, and enables the systemd service. Set `collector_host` and `collector_port` in that file and run `sudo systemctl restart watcher-agent` to apply them. No certificates, keys, tokens or enrollment step.
 
 The Linux agent uses `ss` from `iproute2`, and should be run with appropriate privileges to see process names.
+
+The build script selects release-specific dependencies: Debian 12 uses `libicu72`/`libssl3`; Debian 13 uses `libicu76`/`libssl3t64`. See [Linux installation and dependency troubleshooting](Agent/README-linux.md).
 
 ## Validate communication and storage
 
