@@ -104,3 +104,22 @@ extracted self-contained agent with heartbeat delivery/ACK cleanup. No system
 package was installed during validation; systemd boot/start validation remains a
 target-server check. Debian 12 dependency mapping is retained but was not built
 on a Debian 12 host in this check.
+
+## Listener_Analyzer module
+
+Added a separate rule-based profiling console project with Windows/Linux build
+scripts and local/shared JSONL alert output, as selected by the user. Historical
+rows are learned without alerting. Per-device destinations and full
+IP/port/protocol/process/path combinations track observations and daily activity.
+Live new, infrequent and returning patterns produce reasoned alerts after the
+baseline, with cooldown/age/order rules and durable local outbox delivery.
+
+Integration tests use the actual analyzer executable, synthetic collector-shaped
+SQLite source files and local output. They verify profiles and Windows/Linux
+isolation, usual-traffic suppression, new/rare/returned combinations, cooldowns,
+restart behavior, backlog retry, profile export and unchanged source bytes.
+Source path/cursor changes halt rather than silently missing data. Shared-file
+transport is at least once with stable alert IDs; consumers deduplicate and skip
+partial JSON lines after interrupted writes. Actual SMB/domain permissions and
+Windows startup execution remain deployment checks. No messenger credentials or
+live recipients are used during tests.

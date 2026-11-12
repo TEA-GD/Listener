@@ -271,3 +271,13 @@ TCP metadata agent and startup-task helper. It needs no GUI installer or package
 Run `Register-ServerAgentTask.ps1 -CollectorHost collector.example.local` as
 Administrator to register and start `Watcher-Server-Agent` under SYSTEM after
 every reboot. Events use the existing collector/database/dashboard format.
+
+## Connection profiling and shared-file alerts
+
+[Listener_Analyzer](Listener_Analyzer/README.md) is an independent .NET 10 module
+that learns per-device destination/port/protocol/process profiles from the
+collector database. After an initial silent backfill and per-device baseline,
+it alerts on new destinations, rare monthly usage and long-gap or new/rare
+process/port combinations. Alerts go to a configured JSON-lines file (local or
+a domain share), backed by a persistent retry outbox. The collector database is
+read-only; profiles and delivery state live in a separate local database.

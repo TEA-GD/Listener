@@ -1,0 +1,13 @@
+{
+  "database_path": "C:\\ProgramData\\WatcherCollector\\watcher-events.db",
+  "state_directory": "state",
+  "alerts_file": "alerts.jsonl",
+  "poll_seconds": 10,
+  "baseline_days": 7,
+  "rarity_window_days": 30,
+  "rare_max_active_days": 2,
+  "long_gap_days": 30,
+  "cooldown_hours": 24,
+  "maximum_alert_age_hours": 24,
+  "batch_size": 500
+}
