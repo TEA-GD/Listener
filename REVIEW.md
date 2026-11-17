@@ -123,3 +123,24 @@ transport is at least once with stable alert IDs; consumers deduplicate and skip
 partial JSON lines after interrupted writes. Actual SMB/domain permissions and
 Windows startup execution remain deployment checks. No messenger credentials or
 live recipients are used during tests.
+
+## Thunderbird external-mail module
+
+Added an opt-in Thunderbird 140+ MailExtension, a separate authenticated HTTP mail
+receiver and a key-protected Mail alerts dashboard page. Only new incoming mail
+for selected accounts is considered; configured internal domains/subdomains are
+filtered before body forwarding and independently at the receiver. Message text,
+raw decoded inline MIME text parts and attachment names are preserved, with
+explicit availability flags for unreadable/encrypted/headers-only bodies.
+Attachment contents are excluded from transport. Profiles/outgoing-folder mail
+are not scanned automatically. The chosen user request authorizes this mail
+content collection; no live mail profiles/recipients are used in development.
+
+Synthetic tests cover domain boundaries, malformed/ambiguous handling, MIME
+alternatives/root wrappers and attachment separation, receiver auth/size limits,
+queue persistence/retry/deduplication, safe mail text rendering and unchanged TCP
+rows. Browser tests use real IndexedDB/HTTP/SQLite with mocked Thunderbird APIs
+in Chromium; no Thunderbird binary/mail server is available in this environment.
+Actual installation/new-mail reception, encrypted mail and domain TLS/startup
+remain deployment checks. The XPI is a deterministic internal unsigned package;
+its contents match the included extension sources, without keys or message data.

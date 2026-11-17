@@ -281,3 +281,13 @@ it alerts on new destinations, rare monthly usage and long-gap or new/rare
 process/port combinations. Alerts go to a configured JSON-lines file (local or
 a domain share), backed by a persistent retry outbox. The collector database is
 read-only; profiles and delivery state live in a separate local database.
+
+## Thunderbird external-mail alerts
+
+[Thunderbird_Addon](Thunderbird_Addon/README.md) reports newly received mail from
+outside configured domains, for explicitly selected accounts. Alerts include
+sender/recipients, available decoded message text, attachment names and body
+availability. [Listener_MailReceiver](Listener_MailReceiver/README.md) authenticates
+and stores these in the collector DB's separate `email_alerts` table. The updated
+GUI has **Mail alerts**, protected by a separate mail-viewing key. Mail collection
+is disabled until configured; TCP agents and connection analysis are unchanged.

@@ -130,3 +130,14 @@ network traffic, malicious behavior or continuous inactivity. New deployments,
 data deletion, agent downtime, long-lived connections between snapshots, and
 incorrect endpoint clocks can affect classifications. No persistent alert state
 or database writes are created; results are recomputed on refresh.
+
+## External mail alerts
+
+The header's **Mail alerts** link opens `/mail.html` for Thunderbird alerts stored
+by [Listener_MailReceiver](../Listener_MailReceiver/README.md). The mail table is
+optional; TCP views continue to work without it. Email APIs are disabled by
+default. Configure `LISTENER_MAIL_VIEW_TOKEN` or a protected
+`LISTENER_MAIL_VIEW_TOKEN_FILE` (key length at least 32 characters), then enter that
+key in the mail page. `Start-Windows.ps1 -MailViewKeyFile <path>` selects a file.
+Use a separate read key from the receiver's write key and trusted HTTPS for
+remote access. Bodies/HTML sources/filenames render as inert plain text.

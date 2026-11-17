@@ -2,3 +2,4 @@
 .table-scroll{max-height:560px}thead th{position:sticky;top:0;z-index:1}
 
 .connection-board{margin-bottom:24px}.board-note{font-size:12px;line-height:1.65;margin:16px 20px}.connection-board form{margin:16px 20px}.new-connection{color:#176a48;background:#e8f6ef}.returned-connection{color:#98651b;background:#fff4df}#connections td:nth-child(6),#connections td:nth-child(7){white-space:normal;min-width:120px;max-width:240px;overflow-wrap:anywhere}
+.nav-link{color:#cbd8fa;font-size:13px;text-decoration:none}.nav-link:hover{text-decoration:underline}.mail-main{max-width:1600px;margin:auto}.mail-detail{margin-top:24px}.mail-detail pre{white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.7 ui-monospace,monospace;padding:20px;margin:0;background:#f9fbfd}.mail-detail details{padding:20px}.mail-section-title{padding:0 20px 12px}.mail-main td{max-width:340px;white-space:normal;overflow-wrap:anywhere}.mail-main td button{white-space:nowrap}

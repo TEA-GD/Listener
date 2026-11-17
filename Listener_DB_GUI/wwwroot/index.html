@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Listener · Database Explorer</title><link rel="stylesheet" href="app.css"><script defer src="app.js"></script></head>
-<body><header><div class="brand"><span class="logo">L</span><div>Listener <small>DATABASE EXPLORER</small></div></div><div class="header-right"><span class="readonly">Read-only view</span><button id="refresh">Refresh data</button></div></header>
+<body><header><div class="brand"><span class="logo">L</span><div>Listener <small>DATABASE EXPLORER</small></div></div><div class="header-right"><a class="nav-link" href="mail.html">Mail alerts</a><span class="readonly">Read-only view</span><button id="refresh">Refresh data</button></div></header>
 <div class="layout"><aside><div class="section-title">MONITORED COMPUTERS <span id="pcCount">0</span></div><label class="sr-only" for="pcSearch">Find a PC</label><input id="pcSearch" placeholder="Find a PC…" type="search"><div id="pcs" aria-live="polite"></div><p class="aside-note">PC identity is reported by the agent.<br>Last received shows collector receipt time.</p></aside>
 <main><div id="error" role="alert" hidden></div><div class="page-heading"><div><div class="eyebrow">ENDPOINT ACTIVITY</div><h1 id="title">Choose a computer</h1><p id="subtitle">Explore connection events collected by Watcher.</p></div><span id="updated"></span></div>
 <div id="empty" class="empty">Select a PC on the left to view its statistics and event history.</div>

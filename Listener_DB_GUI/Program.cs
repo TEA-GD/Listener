@@ -8,6 +8,8 @@ if (string.IsNullOrEmpty(builder.Configuration["urls"])) builder.WebHost.UseUrls
 builder.Services.AddSingleton(new ViewerDatabase(
     Environment.GetEnvironmentVariable("WATCHER_DB_PATH") ?? builder.Configuration["DatabasePath"] ??
     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WatcherCollector", "watcher-events.db")));
+string mailViewToken=Environment.GetEnvironmentVariable("LISTENER_MAIL_VIEW_TOKEN")??(Environment.GetEnvironmentVariable("LISTENER_MAIL_VIEW_TOKEN_FILE") is string mailKeyPath?File.ReadAllText(mailKeyPath).Trim():"");
+if(mailViewToken.Length>0&&mailViewToken.Length<32)throw new ArgumentException("Mail viewing key must contain at least 32 characters.");
 var app = builder.Build();
 app.Use(async (context, next) => {
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -139,6 +141,34 @@ app.MapGet("/api/connections", (HttpRequest request, ViewerDatabase database) =>
         """, parameters);
     return Results.Ok(new { host, day, gapDays, page, size, summary, destinations });
 });
+app.MapGet("/api/mail",(HttpRequest request,ViewerDatabase database)=>{
+    var denied=MailAccess(request);if(denied is not null)return denied;
+    int page=ParseNumber(request.Query["page"].ToString(),1,1,1000000);
+    string search=request.Query["q"].ToString();if(search.Length>200)throw new ArgumentException("Mail search must be at most 200 characters.");
+    using var db=database.Open();
+    if(ViewerDatabase.Query(db,"SELECT name FROM sqlite_master WHERE type='table' AND name='email_alerts'").Count==0)
+        return Results.Ok(new{available=false,total=0,page,size=50,alerts=Array.Empty<object>()});
+    string where=search.Length==0?"":" WHERE instr(lower(sender),lower($q))>0 OR instr(lower(subject),lower($q))>0 OR instr(lower(recipients_json),lower($q))>0 OR instr(lower(client_label),lower($q))>0";
+    var args=new Dictionary<string,object>();if(search.Length>0)args["$q"]=search;
+    var total=ViewerDatabase.Query(db,"SELECT COUNT(*) AS total FROM email_alerts"+where,args)[0]["total"];
+    args["$limit"]=50;args["$offset"]=(page-1)*50;
+    var alerts=ViewerDatabase.Query(db,"SELECT alert_id,client_label,sender,sender_domain,subject,recipients_json,attachment_names_json,body_status,message_date_utc,received_utc FROM email_alerts"+where+" ORDER BY received_utc DESC,alert_id LIMIT $limit OFFSET $offset",args);
+    return Results.Ok(new{available=true,total,page,size=50,alerts});
+});
+app.MapGet("/api/mail/{id}",(string id,HttpRequest request,ViewerDatabase database)=>{
+    var denied=MailAccess(request);if(denied is not null)return denied;
+    if(!Guid.TryParseExact(id,"D",out _))return Results.BadRequest(new{error="Invalid mail alert ID"});
+    using var db=database.Open();
+    if(ViewerDatabase.Query(db,"SELECT name FROM sqlite_master WHERE type='table' AND name='email_alerts'").Count==0)return Results.NotFound(new{error="Mail receiver has not initialized this database"});
+    var rows=ViewerDatabase.Query(db,"SELECT * FROM email_alerts WHERE alert_id=$id",new(){["$id"]=id});
+    return rows.Count==0?Results.NotFound(new{error="Mail alert not found"}):Results.Ok(rows[0]);
+});
+IResult? MailAccess(HttpRequest request){
+    if(mailViewToken.Length==0)return Results.Json(new{error="Mail viewing is disabled. Configure LISTENER_MAIL_VIEW_TOKEN or LISTENER_MAIL_VIEW_TOKEN_FILE on the dashboard server."},statusCode:403);
+    var expected=System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("Bearer "+mailViewToken));
+    var actual=System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(request.Headers.Authorization.ToString()));
+    return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(expected,actual)?null:Results.Json(new{error="Mail access key required"},statusCode:401);
+}
 app.Run();
 
 static int ParseNumber(string value, int fallback, int min, int max) {

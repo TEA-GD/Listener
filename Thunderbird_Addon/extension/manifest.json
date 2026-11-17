@@ -1,0 +1,12 @@
+{
+  "manifest_version": 2,
+  "name": "Listener External Mail Alerts",
+  "version": "1.0.0",
+  "description": "Report newly received external-domain mail to your configured Listener receiver.",
+  "browser_specific_settings": {"gecko": {"id": "listener-mail-alerts@tea-gd.local", "strict_min_version": "140.0"}},
+  "permissions": ["accountsRead", "messagesRead", "storage", "unlimitedStorage", "alarms"],
+  "optional_permissions": ["http://*/*", "https://*/*"],
+  "background": {"scripts": ["core.js", "background.js"], "persistent": true},
+  "options_ui": {"page": "options.html", "open_in_tab": true},
+  "browser_action": {"default_title": "Listener mail alert settings"}
+}
