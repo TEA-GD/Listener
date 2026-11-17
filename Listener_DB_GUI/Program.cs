@@ -43,6 +43,8 @@ app.MapGet("/api/pc", (HttpRequest request, ViewerDatabase database) => {
     if (q.Length > 200) throw new ArgumentException("Search must be at most 200 characters.");
     string type = request.Query["type"].ToString();
     if (type.Length > 40) throw new ArgumentException("Invalid event type.");
+    string protocol=request.Query["protocol"].ToString().ToUpperInvariant();
+    if(protocol is not ("" or "TCP" or "UDP"))throw new ArgumentException("Protocol must be TCP or UDP.");
     int page = ParseNumber(request.Query["page"].ToString(), 1, 1, 1000000);
     int size = ParseNumber(request.Query["size"].ToString(), 50, 1, 200);
     var parameters = new Dictionary<string, object> { ["$host"] = host };
@@ -59,9 +61,10 @@ app.MapGet("/api/pc", (HttpRequest request, ViewerDatabase database) => {
         string.CompareOrdinal((string)from, (string)to) > 0) throw new ArgumentException("From date must not be after To date.");
     if (q.Length > 0) {
         parameters["$q"] = q;
-        where += " AND (instr(lower(PROCESS_NAME),lower($q))>0 OR instr(SOURCE_IP,$q)>0 OR instr(RECIEVER_IP,$q)>0 OR instr(PORT_USED,$q)>0 OR instr(EVENT_ID,$q)>0)";
+        where += " AND (instr(lower(PROCESS_NAME),lower($q))>0 OR instr(SOURCE_IP,$q)>0 OR instr(RECIEVER_IP,$q)>0 OR instr(PORT_USED,$q)>0 OR instr(EVENT_ID,$q)>0 OR instr(SOURCE_PORT,$q)>0)";
     }
     if (type.Length > 0) { parameters["$type"] = type; where += " AND EVENT_TYPE=$type"; }
+    if(protocol.Length>0){parameters["$protocol"]=protocol;where+=" AND PROTOCOL=$protocol";}
     string destination = request.Query["destination"].ToString();
     if (destination.Length > 0) {
         if (destination.Length > 64 || !System.Net.IPAddress.TryParse(destination, out _))
@@ -74,11 +77,12 @@ app.MapGet("/api/pc", (HttpRequest request, ViewerDatabase database) => {
         SELECT COUNT(*) AS events, COUNT(DISTINCT NULLIF(PROCESS_NAME,'')) AS processes,
           COUNT(DISTINCT NULLIF(RECIEVER_IP,'')) AS destinations,
           SUM(CASE WHEN EVENT_TYPE='TCP_CONNECTED' THEN 1 ELSE 0 END) AS connections,
+          SUM(CASE WHEN PROTOCOL='UDP' AND EVENT_TYPE IN ('UDP_ENDPOINT_AT_START','UDP_ENDPOINT_OPENED') THEN 1 ELSE 0 END) AS udpEndpoints,
           MIN(TIMESTAMP_UTC) AS firstEvent, MAX(TIMESTAMP_UTC) AS lastEvent
         FROM events
         """ + where, parameters)[0];
     var groups = new Dictionary<string, object>();
-    foreach (var (name, column) in new[] { ("types", "EVENT_TYPE"), ("processes", "PROCESS_NAME"), ("destinations", "RECIEVER_IP"), ("ports", "PORT_USED") })
+    foreach (var (name, column) in new[] { ("types", "EVENT_TYPE"), ("processes", "PROCESS_NAME"), ("destinations", "RECIEVER_IP"), ("ports", "PORT_USED"), ("localPorts", "SOURCE_PORT") })
         groups[name] = ViewerDatabase.Query(db, $"SELECT [{column}] AS name, COUNT(*) AS count FROM events" + where +
             $" AND [{column}]<>'' GROUP BY [{column}] ORDER BY count DESC,name LIMIT 10", parameters);
     var paging = new Dictionary<string, object>(parameters) { ["$limit"] = size, ["$offset"] = (page - 1) * size };
@@ -93,10 +97,12 @@ app.MapGet("/api/connections", (HttpRequest request, ViewerDatabase database) =>
     if (day.Length == 0) day = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
     if (!DateOnly.TryParseExact(day, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
         throw new ArgumentException("Day must use yyyy-MM-dd (UTC).");
+    string protocol=request.Query["protocol"].ToString().ToUpperInvariant();
+    if(protocol is not ("" or "TCP" or "UDP"))throw new ArgumentException("Protocol must be TCP or UDP.");
     int gapDays = ParseNumber(request.Query["gapDays"].ToString(), 30, 1, 36500);
     int page = ParseNumber(request.Query["page"].ToString(), 1, 1, 1000000);
     const int size = 50;
-    var parameters = new Dictionary<string, object> { ["$host"] = host, ["$day"] = day, ["$gap"] = gapDays };
+    var parameters = new Dictionary<string, object> { ["$host"] = host, ["$day"] = day, ["$gap"] = gapDays, ["$protocol"] = protocol };
     using var db = database.Open();
     // Compare against event time, never receipt order. Disconnects also prove prior
     // observation, but only a connected/startup event can create a candidate today.
@@ -108,13 +114,13 @@ app.MapGet("/api/connections", (HttpRequest request, ViewerDatabase database) =>
                 group_concat(DISTINCT NULLIF(PROCESS_NAME,'')) AS processes
             FROM events
             WHERE host=$host AND date_utc=$day AND RECIEVER_IP<>''
-              AND EVENT_TYPE IN ('TCP_CONNECTED','ACTIVE_AT_START')
+              AND EVENT_TYPE IN ('TCP_CONNECTED','ACTIVE_AT_START','UDP_ENDPOINT_AT_START','UDP_ENDPOINT_OPENED') AND ($protocol='' OR PROTOCOL=$protocol)
             GROUP BY RECIEVER_IP
         ), prior AS (
             SELECT history.RECIEVER_IP AS ip, MAX(julianday(history.TIMESTAMP_UTC)) AS previousSeen
             FROM events AS history JOIN today ON history.RECIEVER_IP=today.ip
             WHERE history.host=$host AND history.date_utc<=$day
-              AND history.EVENT_TYPE IN ('TCP_CONNECTED','ACTIVE_AT_START','TCP_DISCONNECTED')
+              AND history.EVENT_TYPE IN ('TCP_CONNECTED','ACTIVE_AT_START','TCP_DISCONNECTED','UDP_ENDPOINT_AT_START','UDP_ENDPOINT_OPENED','UDP_ENDPOINT_CLOSED') AND ($protocol='' OR history.PROTOCOL=$protocol)
               AND julianday(history.TIMESTAMP_UTC)<today.firstSeen
             GROUP BY history.RECIEVER_IP
         ), compared AS (

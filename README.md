@@ -1,4 +1,4 @@
-# Watcher V6 — PLAIN TCP collector + Windows/Linux agents (install/uninstall GUI)
+# Watcher — TCP/UDP socket monitoring with a TCP collector
 
 **No authentication tokens. No TLS certificates. No private/public keys. No Python needed for the installed C# programs.**
 
@@ -140,10 +140,10 @@ cd Agent
 ./build/build-linux.sh
 ```
 
-The package will be written to `Agent/output/watcher-agent_1.0.1_amd64.deb`. On the target Linux machine:
+The package will be written to `Agent/output/watcher-agent_1.0.2_amd64.deb`. On the target Linux machine:
 
 ```bash
-sudo apt install ./watcher-agent_1.0.1_amd64.deb
+sudo apt install ./watcher-agent_1.0.2_amd64.deb
 sudo systemctl status watcher-agent
 sudo journalctl -u watcher-agent -n 50 --no-pager
 ```
@@ -291,3 +291,11 @@ availability. [Listener_MailReceiver](Listener_MailReceiver/README.md) authentic
 and stores these in the collector DB's separate `email_alerts` table. The updated
 GUI has **Mail alerts**, protected by a separate mail-viewing key. Mail collection
 is disabled until configured; TCP agents and connection analysis are unchanged.
+
+## UDP monitoring
+
+Updated agents monitor TCP sockets and UDP endpoints. Windows records local UDP
+bindings and process ownership; Linux also includes configured peers when exposed
+by `ss`. See [UDP behavior and upgrade order](Agent/UDP.md). Update the collector
+first, then agents, GUI and analyzer. Metadata delivery remains TCP/ACK on port
+6515; no UDP collector port is added. Existing database columns are reused.

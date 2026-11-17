@@ -153,6 +153,37 @@ class Dashboard(unittest.TestCase):
         self.assertEqual(2,self.request('/api/pc?host=Rare-PC&destination=203.0.113.20&from=2026-11-09&to=2026-11-09')['stats']['events'])
         self.assertEqual(self.original,hashlib.sha256(self.db.read_bytes()).hexdigest())
 
+    def test_udp_api_and_browser(self):
+        path=Path(self.temp.name)/'udp.db';shutil.copyfile(self.db,path)
+        with sqlite3.connect(path) as db:
+            fixtures=[('UDP_ENDPOINT_AT_START','UDP','5353','','','BOUND'),('UDP_ENDPOINT_OPENED','UDP','9999','','','BOUND'),('UDP_ENDPOINT_CLOSED','UDP','5353','','','CLOSED_OR_NOT_OBSERVED'),('UDP_ENDPOINT_OPENED','UDP','50001','203.0.113.99','443','PEER_CONFIGURED'),('TCP_CONNECTED','TCP','50002','203.0.113.99','443','ESTABLISHED')]
+            for i,(kind,protocol,local,ip,port,state) in enumerate(fixtures):
+                row=dict.fromkeys(FIELDS,'');row.update(EVENT_ID=f'udp-{i}',EVENT_TYPE=kind,PROTOCOL=protocol,SOURCE_IP='0.0.0.0',SOURCE_PORT=local,RECIEVER_IP=ip,PORT_USED=port,STATE=state,TIMESTAMP_UTC=f'2026-11-09T09:00:0{i}Z',MONITORED_HOST='PC-UDP',PROCESS_NAME='udp-app')
+                db.execute('INSERT INTO events VALUES('+','.join('?' for _ in range(len(FIELDS)+3))+')',[row[f] for f in FIELDS]+['PC-UDP','2026-11-09','2026-11-09T09:00:00Z'])
+        url=self.start(path)
+        def get(path):
+            with urllib.request.urlopen(url+path) as response:return json.load(response)
+        data=get('/api/pc?host=PC-UDP&protocol=UDP');self.assertEqual(4,data['stats']['events']);self.assertEqual(3,data['stats']['udpEndpoints'])
+        self.assertEqual(2,get('/api/pc?host=PC-UDP&protocol=UDP&q=5353')['stats']['events'])
+        board=get('/api/connections?host=PC-UDP&day=2026-11-09&protocol=UDP')
+        self.assertEqual(1,board['summary']['total']);self.assertEqual('203.0.113.99',board['destinations'][0]['ip'])
+        self.assertEqual(1,get('/api/pc?host=PC-UDP&protocol=TCP')['stats']['events'])
+        with self.assertRaises(urllib.error.HTTPError) as e:get('/api/pc?host=PC-UDP&protocol=ICMP')
+        self.assertEqual(400,e.exception.code)
+        from playwright.sync_api import sync_playwright,expect
+        with sync_playwright() as p:
+            browser=p.chromium.launch(headless=True,args=['--no-sandbox'],executable_path=shutil.which('chromium'));page=browser.new_page()
+            page.goto(url);page.get_by_role('button',name='PC-UDP',exact=False).click()
+            page.locator('#protocol').select_option('UDP');page.get_by_role('button',name='Apply filters').click()
+            expect(page.locator('#resultCount')).to_have_text('4 matching events');expect(page.locator('#events')).to_contain_text('5353')
+            expect(page.locator('#events')).to_contain_text('PEER_CONFIGURED')
+            expect(page.get_by_role('columnheader',name='Local port',exact=True)).to_be_visible()
+            page.locator('#connectionProtocol').select_option('UDP');page.get_by_role('button',name='Check connections').click()
+            expect(page.locator('#connectionSummary')).to_have_text('1 new · 0 returned')
+            page.get_by_role('button',name='Show events for 203.0.113.99',exact=True).click()
+            expect(page.locator('#protocol')).to_have_value('UDP');expect(page.locator('#resultCount')).to_have_text('1 matching events')
+            browser.close()
+
     def test_browser(self):
         from playwright.sync_api import sync_playwright, expect
         with sync_playwright() as p:

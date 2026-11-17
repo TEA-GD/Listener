@@ -12,6 +12,8 @@ function Read-AgentConfig([string]$Path) {
     foreach ($name in @('agent_id','collector_host','collector_port','spool_dir','log_file','poll_seconds','heartbeat_seconds','max_spool_events','send_batch_size')) {
         if ($null -eq $c.PSObject.Properties[$name]) { throw "Missing configuration field: $name" }
     }
+    if ($null -eq $c.PSObject.Properties['collect_udp']) { $c | Add-Member -NotePropertyName collect_udp -NotePropertyValue $true }
+    if ($c.collect_udp -isnot [bool]) { throw 'collect_udp must be true or false' }
     if ($c.agent_id -notmatch '^[A-Za-z0-9_.-]{1,120}$' -or $c.agent_id -in @('.','..')) { throw 'Invalid agent_id' }
     $c.collector_host = ([string]$c.collector_host).Trim()
     if ([Uri]::CheckHostName($c.collector_host) -eq [UriHostNameType]::Unknown) { throw 'Invalid collector hostname; use a DNS name or IP without a URL or port' }
@@ -37,7 +39,7 @@ function Write-AgentLog($Config, [string]$Message) {
     } catch { Write-Warning "Could not write agent log: $($_.Exception.Message)" }
 }
 
-function Get-ConnectionSnapshot {
+function Get-ConnectionSnapshot([bool]$CollectUdp=$true) {
     $processes = @{}
     Get-CimInstance Win32_Process -ErrorAction Stop | ForEach-Object { $processes[[int]$_.ProcessId] = $_ }
     $connections = @{}
@@ -53,11 +55,27 @@ function Get-ConnectionSnapshot {
         $process = $processes[[int]$row.OwningProcess]
         $name = 'Unknown'; $path = ''
         if ($null -ne $process) { $name = [string]$process.Name; $path = [string]$process.ExecutablePath }
-        $key = @($row.LocalAddress,$row.LocalPort,$row.RemoteAddress,$row.RemotePort,$row.OwningProcess) -join '|'
+        $key = @('TCP',$row.LocalAddress,$row.LocalPort,$row.RemoteAddress,$row.RemotePort,$row.OwningProcess) -join '|'
         $connections[$key] = [pscustomobject]@{
             LocalIP=[string]$row.LocalAddress; LocalPort=[int]$row.LocalPort
             RemoteIP=[string]$row.RemoteAddress; RemotePort=[int]$row.RemotePort
-            ProcessId=[int]$row.OwningProcess; ProcessName=$name; Software=$path
+            ProcessId=[int]$row.OwningProcess; ProcessName=$name; Software=$path; Protocol='TCP'; SocketState='ESTABLISHED'
+        }
+    }
+    if ($CollectUdp) {
+        $endpoints = @()
+        try { $endpoints = @(Get-NetUDPEndpoint -ErrorAction Stop) }
+        catch { if ($_.FullyQualifiedErrorId -notlike 'CmdletizationQuery_NotFound*') { throw } }
+        foreach ($endpoint in $endpoints) {
+            $process = $processes[[int]$endpoint.OwningProcess]
+            $name='Unknown'; $path=''
+            if ($null -ne $process) { $name=[string]$process.Name; $path=[string]$process.ExecutablePath }
+            $key=@('UDP',$endpoint.LocalAddress,$endpoint.LocalPort,$endpoint.OwningProcess) -join '|'
+            $connections[$key]=[pscustomobject]@{
+                LocalIP=[string]$endpoint.LocalAddress; LocalPort=[int]$endpoint.LocalPort
+                RemoteIP=''; RemotePort=0; ProcessId=[int]$endpoint.OwningProcess
+                ProcessName=$name; Software=$path; Protocol='UDP'; SocketState='BOUND'
+            }
         }
     }
     return $connections
@@ -74,10 +92,11 @@ function New-AgentEvent($Config, [string]$Snapshot, [string]$Type, $Connection) 
     }
     if ($null -ne $Connection) {
         $row.SOURCE_IP=$Connection.LocalIP; $row.PROCESS_NAME=$Connection.ProcessName; $row.PROCESS_ID=[string]$Connection.ProcessId
-        $row.RECIEVER_IP=$Connection.RemoteIP; $row.PORT_USED=[string]$Connection.RemotePort
+        $row.RECIEVER_IP=$Connection.RemoteIP
+        if ($Connection.RemotePort -gt 0) { $row.PORT_USED=[string]$Connection.RemotePort }
         $row.SOFTWARE_THAT_USED=$Connection.Software; $row.SOURCE_PORT=[string]$Connection.LocalPort
-        $row.PROTOCOL='TCP'; $row.STATE='ESTABLISHED'
-        if ($Type -eq 'TCP_DISCONNECTED') { $row.STATE='CLOSED_OR_NOT_OBSERVED' }
+        $row.PROTOCOL=$Connection.Protocol; $row.STATE=$Connection.SocketState
+        if ($Type -in @('TCP_DISCONNECTED','UDP_ENDPOINT_CLOSED')) { $row.STATE='CLOSED_OR_NOT_OBSERVED' }
     }
     return $row
 }
@@ -115,7 +134,7 @@ function Send-Spool($Config) {
     try {
         $connect = $client.ConnectAsync($Config.collector_host, $Config.collector_port)
         if (-not $connect.Wait(8000)) { throw 'Collector connect timeout' }
-        $connect.GetAwaiter().GetResult()
+        $connect.GetAwaiter().GetResult() | Out-Null
         $stream = $client.GetStream(); $stream.ReadTimeout=10000; $stream.WriteTimeout=10000
         $sent = 0
         foreach ($file in $files) {
@@ -147,16 +166,16 @@ function Invoke-ServerAgent([string]$Path, [bool]$RunOnce) {
         do {
             $clock = [Diagnostics.Stopwatch]::StartNew(); $failed = $false
             try {
-                $current = Get-ConnectionSnapshot
+                $current = Get-ConnectionSnapshot $config.collect_udp
                 $batch = [Collections.Generic.List[object]]::new()
                 $snapshot = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
                 foreach ($key in $current.Keys) {
-                    if ($null -eq $previous) { $batch.Add((New-AgentEvent $config $snapshot 'ACTIVE_AT_START' $current[$key])) }
-                    elseif (-not $previous.ContainsKey($key)) { $batch.Add((New-AgentEvent $config $snapshot 'TCP_CONNECTED' $current[$key])) }
+                    if ($null -eq $previous) { $type='ACTIVE_AT_START'; if ($current[$key].Protocol -eq 'UDP') { $type='UDP_ENDPOINT_AT_START' }; $batch.Add((New-AgentEvent $config $snapshot $type $current[$key])) }
+                    elseif (-not $previous.ContainsKey($key)) { $type='TCP_CONNECTED'; if ($current[$key].Protocol -eq 'UDP') { $type='UDP_ENDPOINT_OPENED' }; $batch.Add((New-AgentEvent $config $snapshot $type $current[$key])) }
                 }
                 if ($null -ne $previous) {
                     foreach ($key in $previous.Keys) {
-                        if (-not $current.ContainsKey($key)) { $batch.Add((New-AgentEvent $config $snapshot 'TCP_DISCONNECTED' $previous[$key])) }
+                        if (-not $current.ContainsKey($key)) { $type='TCP_DISCONNECTED'; if ($previous[$key].Protocol -eq 'UDP') { $type='UDP_ENDPOINT_CLOSED' }; $batch.Add((New-AgentEvent $config $snapshot $type $previous[$key])) }
                     }
                 }
                 $heartbeatDue = ([DateTimeOffset]::UtcNow - $lastHeartbeat).TotalSeconds -ge $config.heartbeat_seconds

@@ -6,6 +6,7 @@ internal sealed class AgentConfig
 {
     public string agent_id { get; set; } = "";
     public string spool_dir { get; set; } = "";
+    public bool collect_udp { get; set; } = true;
     public string collector_host { get; set; } = CollectorSettings.Host;
     public int collector_port { get; set; } = CollectorSettings.Port;
 

@@ -14,11 +14,13 @@ if ([Uri]::CheckHostName($CollectorHost) -eq [UriHostNameType]::Unknown) { throw
 $taskName = 'Watcher-Server-Agent'
 $directory = Join-Path $env:ProgramData 'WatcherServerAgent'
 $configPath = Join-Path $directory 'agent.json'
+$collectUdp = $true
 $source = Join-Path $PSScriptRoot 'Watcher-ServerAgent.ps1'
 if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw 'Keep Watcher-ServerAgent.ps1 beside this registration helper.' }
 if (Test-Path -LiteralPath $configPath) {
     $existing = Get-Content -LiteralPath $configPath -Encoding UTF8 -Raw | ConvertFrom-Json
     if ([string]::IsNullOrWhiteSpace($AgentId)) { $AgentId = [string]$existing.agent_id }
+    if ($existing.PSObject.Properties['collect_udp']) { if ($existing.collect_udp -isnot [bool]) { throw 'Existing collect_udp must be boolean' }; $collectUdp=$existing.collect_udp }
 }
 if ([string]::IsNullOrWhiteSpace($AgentId)) {
     $AgentId = $env:COMPUTERNAME
@@ -44,7 +46,7 @@ if ([IO.Path]::GetFullPath($source) -ne [IO.Path]::GetFullPath($script)) { Copy-
 $spool = Join-Path $directory 'spool'
 [IO.Directory]::CreateDirectory($spool) | Out-Null
 $config = [ordered]@{
-    agent_id=$AgentId; collector_host=$CollectorHost; collector_port=$CollectorPort
+    agent_id=$AgentId; collector_host=$CollectorHost; collector_port=$CollectorPort; collect_udp=$collectUdp
     spool_dir=$spool; log_file=(Join-Path $directory 'agent.log')
     poll_seconds=$PollSeconds; heartbeat_seconds=60; max_spool_events=50000; send_batch_size=1000
 }

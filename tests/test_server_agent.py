@@ -85,4 +85,45 @@ class ServerAgent(unittest.TestCase):
                     try:process.wait(timeout=10)
                     except subprocess.TimeoutExpired:process.kill();process.wait()
 
+    def test_udp_bindings_and_transitions(self):
+        pwsh=os.environ.get('PWSH_PATH') or shutil.which('pwsh');dotnet=os.environ.get('DOTNET_HOST_PATH') or shutil.which('dotnet')
+        with tempfile.TemporaryDirectory(prefix='watcher-udp-server-') as directory:
+            root=pathlib.Path(directory);env=dict(os.environ,XDG_CACHE_HOME=str(root/'cache'),XDG_CONFIG_HOME=str(root/'config'))
+            with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
+            config={'agent_id':'UDP-server','collector_host':'localhost','collector_port':port,'spool_dir':str(root/'spool'),'log_file':str(root/'agent.log'),'poll_seconds':1,'heartbeat_seconds':60,'max_spool_events':50000,'send_batch_size':1000}
+            path=root/'agent.json';path.write_text(json.dumps(config))
+            collector={'bind_host':'127.0.0.1','bind_port':port,'database_path':str(root/'events.db'),'csv_dir':str(root/'csv'),'log_file':str(root/'collector.log'),'csv_export_seconds':1,'allowed_client_cidrs':[]}
+            cfg=root/'collector.json';cfg.write_text(json.dumps(collector))
+            command=[pwsh,'-NoLogo','-NoProfile','-File',str(ROOT/'tests/Test-ServerAgent.ps1'),'-AgentScript',str(ROOT/'ServerAgent/Watcher-ServerAgent.ps1'),'-ConfigPath',str(path),'-Mode']
+            with (root/'output.log').open('w+') as log:
+                process=subprocess.Popen([dotnet,str(ROOT/'tests/ServerAgentCollector/bin/Release/net10.0/ServerAgentCollector.dll'),'--config',str(cfg)],env=env,stdout=log,stderr=subprocess.STDOUT)
+                try:
+                    for _ in range(100):
+                        try:
+                            with socket.create_connection(('127.0.0.1',port),timeout=.2):break
+                        except OSError:time.sleep(.05)
+                    result=subprocess.run(command+['Udp'],env=env,capture_output=True,text=True,timeout=30)
+                    self.assertEqual(0,result.returncode,result.stdout+result.stderr)
+                    with sqlite3.connect(root/'events.db') as db:
+                        self.assertEqual(('UDP','0.0.0.0','5353','','','BOUND'),db.execute("SELECT PROTOCOL,SOURCE_IP,SOURCE_PORT,RECIEVER_IP,PORT_USED,STATE FROM events WHERE EVENT_TYPE='UDP_ENDPOINT_AT_START'").fetchone())
+                    loop=subprocess.Popen(command+['UdpContinuous'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                    try:
+                        closed=0
+                        for _ in range(120):
+                            with sqlite3.connect(root/'events.db') as db:closed=db.execute("SELECT COUNT(*) FROM events WHERE EVENT_TYPE='UDP_ENDPOINT_CLOSED'").fetchone()[0]
+                            if closed==2:break
+                            time.sleep(.1)
+                        self.assertEqual(2,closed)
+                        with sqlite3.connect(root/'events.db') as db:
+                            self.assertEqual(('9999',),db.execute("SELECT SOURCE_PORT FROM events WHERE EVENT_TYPE='UDP_ENDPOINT_OPENED'").fetchone())
+                            self.assertEqual(0,db.execute("SELECT COUNT(*) FROM events WHERE PROTOCOL='UDP' AND RECIEVER_IP<>''").fetchone()[0])
+                    finally:
+                        loop.terminate()
+                        try:loop.wait(timeout=5)
+                        except subprocess.TimeoutExpired:loop.kill();loop.wait()
+                finally:
+                    process.terminate()
+                    try:process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:process.kill();process.wait()
+
 if __name__=='__main__':unittest.main(verbosity=2)

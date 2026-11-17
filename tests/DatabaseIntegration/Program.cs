@@ -20,6 +20,7 @@ internal static class DatabaseIntegration
         {
             foreach (bool legacy in new[] { false, true }) Test(root, legacy);
             TestRollback(root);
+            TestUdpStorage(root);
             TestListener(root).GetAwaiter().GetResult();
             Console.WriteLine("PASS: fresh storage, migration, idempotency, deduplication, peer IP, CSV and migration rollback, port-only listener and optional CIDR filtering");
         }
@@ -172,6 +173,30 @@ internal static class DatabaseIntegration
                 await worker.StopAsync(timeout.Token);
             }
         }
+    }
+
+    private static void TestUdpStorage(string root)
+    {
+        string path=Path.Combine(root,"udp-storage.db");Database.Initialize(path);
+        var row=Database.CsvFields.ToDictionary(f=>f,_=>"");
+        row["EVENT_ID"]=Guid.NewGuid().ToString();row["EVENT_TYPE"]="UDP_ENDPOINT_AT_START";
+        row["TIMESTAMP_UTC"]="2026-11-17T09:00:00Z";row["MONITORED_HOST"]="udp-host";
+        row["PROTOCOL"]="UDP";row["SOURCE_IP"]="0.0.0.0";row["SOURCE_PORT"]="5353";row["STATE"]="BOUND";
+        using(var envelope=JsonDocument.Parse(JsonSerializer.Serialize(new{@event=row})))
+        {
+            Database.Store(path,envelope.RootElement,"127.0.0.1");Database.Store(path,envelope.RootElement,"127.0.0.1");
+        }
+        using var db=new SqliteConnection("Data Source="+path);db.Open();using var cmd=db.CreateCommand();
+        cmd.CommandText="SELECT PROTOCOL,SOURCE_PORT,RECIEVER_IP,PORT_USED FROM events";
+        using(var reader=cmd.ExecuteReader()){Check(reader.Read(),"UDP event missing");Check(reader.GetString(0)=="UDP"&&reader.GetString(1)=="5353"&&reader.GetString(2)==""&&reader.GetString(3)=="","UDP columns changed unknown destination");}
+        cmd.CommandText="SELECT COUNT(*) FROM events";Check((long)cmd.ExecuteScalar()! == 1,"UDP deduplication failed");
+        row["EVENT_ID"]=Guid.NewGuid().ToString();row["PROTOCOL"]="TCP";
+        bool rejected=false;
+        using(var envelope=JsonDocument.Parse(JsonSerializer.Serialize(new{@event=row})))
+            try{Database.Store(path,envelope.RootElement,"127.0.0.1");}catch(ArgumentException){rejected=true;}
+        Check(rejected,"UDP event with TCP protocol accepted");
+        Database.ExportDirty(path,Path.Combine(root,"udp-csv"));
+        Check(File.ReadAllText(Path.Combine(root,"udp-csv","udp-host","2026-11-17.csv")).Contains("UDP_ENDPOINT_AT_START"),"UDP CSV export missing");
     }
 
     private static void TestRollback(string root)

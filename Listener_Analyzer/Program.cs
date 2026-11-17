@@ -49,6 +49,7 @@ internal sealed class AnalyzerConfig
     public int cooldown_hours {get;set;}=24;
     public int maximum_alert_age_hours {get;set;}=24;
     public int batch_size {get;set;}=500;
+    public bool alert_udp_endpoints {get;set;}=false;
     public static AnalyzerConfig Load(string path)
     {
         string directory=Path.GetDirectoryName(Path.GetFullPath(path))!;
@@ -62,9 +63,9 @@ internal sealed class AnalyzerConfig
     }
 }
 
-internal sealed record Observation(long RowId,string EventId,string Host,string Type,DateTimeOffset Time,string Ip,string Port,string Protocol,string Process,string Software,string Os,Dictionary<string,object?> Fields)
+internal sealed record Observation(long RowId,string EventId,string Host,string Type,DateTimeOffset Time,string Ip,string Port,string Protocol,string Process,string Software,string Os,string LocalIp,string LocalPort,Dictionary<string,object?> Fields)
 {
-    public bool Positive => Type is "TCP_CONNECTED" or "ACTIVE_AT_START";
+    public bool Positive => Type is "TCP_CONNECTED" or "ACTIVE_AT_START" or "UDP_ENDPOINT_AT_START" or "UDP_ENDPOINT_OPENED";
     public string Signature=>JsonSerializer.Serialize(new[]{Ip,Port,Protocol,Process,Software});
 }
 
@@ -88,6 +89,8 @@ internal sealed class Analyzer : IDisposable
             CREATE TABLE IF NOT EXISTS connections(host TEXT NOT NULL,signature TEXT NOT NULL,ip TEXT NOT NULL,port TEXT NOT NULL,protocol TEXT NOT NULL,process TEXT NOT NULL,software TEXT NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,observations INTEGER NOT NULL,PRIMARY KEY(host,signature));
             CREATE TABLE IF NOT EXISTS destination_days(host TEXT NOT NULL,ip TEXT NOT NULL,day TEXT NOT NULL,observations INTEGER NOT NULL,PRIMARY KEY(host,ip,day));
             CREATE TABLE IF NOT EXISTS connection_days(host TEXT NOT NULL,signature TEXT NOT NULL,day TEXT NOT NULL,observations INTEGER NOT NULL,PRIMARY KEY(host,signature,day));
+            CREATE TABLE IF NOT EXISTS udp_endpoints(host TEXT NOT NULL,signature TEXT NOT NULL,local_ip TEXT NOT NULL,local_port TEXT NOT NULL,process TEXT NOT NULL,software TEXT NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,observations INTEGER NOT NULL,PRIMARY KEY(host,signature));
+            CREATE TABLE IF NOT EXISTS udp_endpoint_days(host TEXT NOT NULL,signature TEXT NOT NULL,day TEXT NOT NULL,observations INTEGER NOT NULL,PRIMARY KEY(host,signature,day));
             CREATE TABLE IF NOT EXISTS cooldowns(host TEXT NOT NULL,signature TEXT NOT NULL,last_alert TEXT NOT NULL,PRIMARY KEY(host,signature));
             CREATE TABLE IF NOT EXISTS outbox(alert_id TEXT PRIMARY KEY,event_id TEXT NOT NULL UNIQUE,payload_json TEXT NOT NULL,created_utc TEXT NOT NULL,sent_utc TEXT);
             """);
@@ -154,7 +157,7 @@ internal sealed class Analyzer : IDisposable
             long id=Convert.ToInt64(row["analyzer_rowid"],CultureInfo.InvariantCulture);
             if(DateTimeOffset.TryParse(Text("TIMESTAMP_UTC"),CultureInfo.InvariantCulture,DateTimeStyles.None,out var time)&&Text("MONITORED_HOST").Length>0)
             {
-                var observation=new Observation(id,Text("EVENT_ID"),Text("MONITORED_HOST"),Text("EVENT_TYPE"),time.ToUniversalTime(),Text("RECIEVER_IP"),Text("PORT_USED"),Text("PROTOCOL"),Text("PROCESS_NAME"),Text("SOFTWARE_THAT_USED"),Text("OPERATING_SYSTEM"),row);
+                var observation=new Observation(id,Text("EVENT_ID"),Text("MONITORED_HOST"),Text("EVENT_TYPE"),time.ToUniversalTime(),Text("RECIEVER_IP"),Text("PORT_USED"),Text("PROTOCOL"),Text("PROCESS_NAME"),Text("SOFTWARE_THAT_USED"),Text("OPERATING_SYSTEM"),Text("SOURCE_IP"),Text("SOURCE_PORT"),row);
                 Learn(observation,id>bootstrap,transaction);
             }
             else Console.Error.WriteLine("Skipped malformed timestamp/device identity on source row "+id);
@@ -170,8 +173,10 @@ internal sealed class Analyzer : IDisposable
         bool mature=deviceFirst is not null && e.Time-DateTimeOffset.Parse(deviceFirst,CultureInfo.InvariantCulture)>=TimeSpan.FromDays(config.baseline_days);
         bool timely=e.Time>=DateTimeOffset.UtcNow.AddHours(-config.maximum_alert_age_hours)&&e.Time<=DateTimeOffset.UtcNow.AddMinutes(5);
         bool ordered=deviceLast is null||string.CompareOrdinal(now,deviceLast)>=0;
-        bool connection=e.Type is "TCP_CONNECTED" or "ACTIVE_AT_START" or "TCP_DISCONNECTED";
-        if(connection&&IPAddress.TryParse(e.Ip,out _))
+        bool connection=e.Type is "TCP_CONNECTED" or "ACTIVE_AT_START" or "TCP_DISCONNECTED" or "UDP_ENDPOINT_AT_START" or "UDP_ENDPOINT_OPENED" or "UDP_ENDPOINT_CLOSED";
+        bool hasPeer=IPAddress.TryParse(e.Ip,out _)&&e.Ip is not ("0.0.0.0" or "::");
+        if(connection&&e.Protocol=="UDP")LearnUdpEndpoint(e,live&&mature&&timely&&ordered&&!hasPeer,tx);
+        if(connection&&hasPeer)
         {
             string? last=Scalar("SELECT last_seen FROM destinations WHERE host=$host AND ip=$ip",tx,("$host",e.Host),("$ip",e.Ip));
             string? combo=Scalar("SELECT last_seen FROM connections WHERE host=$host AND signature=$signature",tx,("$host",e.Host),("$signature",e.Signature));
@@ -196,14 +201,7 @@ internal sealed class Analyzer : IDisposable
             bool cooled=alerted is null||e.Time-DateTimeOffset.Parse(alerted,CultureInfo.InvariantCulture)>=TimeSpan.FromHours(config.cooldown_hours);
             if(live&&e.Positive&&mature&&timely&&ordered&&cooled&&reasons.Count>0)
             {
-                string alertId=Guid.NewGuid().ToString("D");
-                var fields=new Dictionary<string,object?>(e.Fields,StringComparer.OrdinalIgnoreCase);fields.Remove("analyzer_rowid");
-                string payload=JsonSerializer.Serialize(new{alert_id=alertId,event_id=e.EventId,created_utc=Stamp(DateTimeOffset.UtcNow),device=e.Host,operating_system=e.Os,
-                    destination_ip=e.Ip,destination_port=e.Port,protocol=e.Protocol,process=e.Process,software=e.Software,observed_utc=now,previous_observation_utc=last,
-                    prior_active_days_in_window=days,prior_combination_active_days_in_window=combinationDays,previous_combination_observation_utc=combo,window_days=config.rarity_window_days,reasons,
-                    message=$"{e.Host} connected to {e.Ip}:{e.Port} using {e.Process}. Reasons: {string.Join(", ",reasons)}.",original_event=fields});
-                Exec("INSERT OR IGNORE INTO outbox(alert_id,event_id,payload_json,created_utc) VALUES($id,$event,$payload,$now)",tx,("$id",alertId),("$event",e.EventId),("$payload",payload),("$now",Stamp(DateTimeOffset.UtcNow)));
-                Exec("INSERT INTO cooldowns VALUES($host,$signature,$now) ON CONFLICT(host,signature) DO UPDATE SET last_alert=excluded.last_alert",tx,("$host",e.Host),("$signature",cooldownSignature),("$now",now));
+                QueueAlert(e,reasons,last,combo,days,combinationDays,cooldownSignature,false,tx);
             }
             Exec("""
                 INSERT INTO destinations VALUES($host,$ip,$now,$now,1)
@@ -221,6 +219,32 @@ internal sealed class Analyzer : IDisposable
             ON CONFLICT(host) DO UPDATE SET first_seen=MIN(first_seen,excluded.first_seen),last_seen=MAX(last_seen,excluded.last_seen),
                 os=CASE WHEN excluded.os<>'' AND excluded.last_seen>=last_seen THEN excluded.os ELSE os END,observations=observations+1
             """,tx,("$host",e.Host),("$now",now),("$os",e.Os));
+    }
+    private void QueueAlert(Observation e,List<string> reasons,string? previous,string? previousCombination,int days,int combinationDays,string signature,bool localEndpoint,SqliteTransaction tx)
+    {
+        string alertId=Guid.NewGuid().ToString("D");
+        var fields=new Dictionary<string,object?>(e.Fields,StringComparer.OrdinalIgnoreCase);fields.Remove("analyzer_rowid");
+        string activity=localEndpoint?$"observed UDP endpoint {e.LocalIp}:{e.LocalPort} (remote peer unavailable)":e.Protocol=="UDP"?$"observed a UDP socket configured for {e.Ip}:{e.Port}":$"connected to {e.Ip}:{e.Port}";
+        string payload=JsonSerializer.Serialize(new{alert_id=alertId,event_id=e.EventId,created_utc=Stamp(DateTimeOffset.UtcNow),device=e.Host,operating_system=e.Os,
+            destination_ip=localEndpoint?"":e.Ip,destination_port=localEndpoint?"":e.Port,source_ip=e.LocalIp,source_port=e.LocalPort,local_endpoint=localEndpoint,protocol=e.Protocol,process=e.Process,software=e.Software,observed_utc=Stamp(e.Time),previous_observation_utc=previous,
+            prior_active_days_in_window=days,prior_combination_active_days_in_window=combinationDays,previous_combination_observation_utc=previousCombination,window_days=config.rarity_window_days,reasons,
+            message=$"{e.Host} {activity} using {e.Process}. Reasons: {string.Join(", ",reasons)}.",original_event=fields});
+        Exec("INSERT OR IGNORE INTO outbox(alert_id,event_id,payload_json,created_utc) VALUES($id,$event,$payload,$now)",tx,("$id",alertId),("$event",e.EventId),("$payload",payload),("$now",Stamp(DateTimeOffset.UtcNow)));
+        Exec("INSERT INTO cooldowns VALUES($host,$signature,$now) ON CONFLICT(host,signature) DO UPDATE SET last_alert=excluded.last_alert",tx,("$host",e.Host),("$signature",signature),("$now",Stamp(e.Time)));
+    }
+    private void LearnUdpEndpoint(Observation e,bool eligible,SqliteTransaction tx)
+    {
+        if(!int.TryParse(e.LocalPort,out int port)||port is <1 or >65535)return;
+        string signature=JsonSerializer.Serialize(new[]{"UDP_LOCAL",e.LocalIp,e.LocalPort,e.Process,e.Software}),now=Stamp(e.Time),day=e.Time.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture);
+        string? last=Scalar("SELECT last_seen FROM udp_endpoints WHERE host=$host AND signature=$signature",tx,("$host",e.Host),("$signature",signature));
+        int days=int.Parse(Scalar("SELECT COUNT(*) FROM udp_endpoint_days WHERE host=$host AND signature=$signature AND day>=$from AND day<$day",tx,("$host",e.Host),("$signature",signature),("$from",e.Time.AddDays(-config.rarity_window_days).ToString("yyyy-MM-dd",CultureInfo.InvariantCulture)),("$day",day))!,CultureInfo.InvariantCulture);
+        var reasons=new List<string>();
+        if(last is null)reasons.Add("new_udp_endpoint");
+        else{if(e.Time-DateTimeOffset.Parse(last,CultureInfo.InvariantCulture)>=TimeSpan.FromDays(config.long_gap_days))reasons.Add("returned_udp_endpoint_after_gap");if(days<=config.rare_max_active_days)reasons.Add("rare_udp_endpoint");}
+        string? alert=Scalar("SELECT last_alert FROM cooldowns WHERE host=$host AND signature=$signature",tx,("$host",e.Host),("$signature",signature));
+        if(config.alert_udp_endpoints&&eligible&&e.Positive&&reasons.Count>0&&(alert is null||e.Time-DateTimeOffset.Parse(alert,CultureInfo.InvariantCulture)>=TimeSpan.FromHours(config.cooldown_hours)))QueueAlert(e,reasons,last,last,days,days,signature,true,tx);
+        Exec("INSERT INTO udp_endpoints VALUES($host,$signature,$ip,$port,$process,$software,$now,$now,1) ON CONFLICT(host,signature) DO UPDATE SET first_seen=MIN(first_seen,excluded.first_seen),last_seen=MAX(last_seen,excluded.last_seen),observations=observations+1",tx,("$host",e.Host),("$signature",signature),("$ip",e.LocalIp),("$port",e.LocalPort),("$process",e.Process),("$software",e.Software),("$now",now));
+        Exec("INSERT INTO udp_endpoint_days VALUES($host,$signature,$day,1) ON CONFLICT(host,signature,day) DO UPDATE SET observations=observations+1",tx,("$host",e.Host),("$signature",signature),("$day",day));
     }
     public void Deliver()
     {
@@ -259,7 +283,7 @@ internal sealed class Analyzer : IDisposable
         if(string.Equals(full,config.database_path,StringComparison.OrdinalIgnoreCase)||string.Equals(full,config.alerts_file,StringComparison.OrdinalIgnoreCase)||string.Equals(full,Path.Combine(config.state_directory,"profiles.db"),StringComparison.OrdinalIgnoreCase))throw new ArgumentException("Report must not overwrite source/state/alerts files");
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
         string temp=full+".tmp";
-        File.WriteAllText(temp,JsonSerializer.Serialize(new{generated_utc=Stamp(DateTimeOffset.UtcNow),devices=Rows("SELECT * FROM devices ORDER BY host"),connections=Rows("SELECT * FROM connections ORDER BY host,ip,port,process"),destination_days=Rows("SELECT * FROM destination_days ORDER BY host,ip,day"),connection_days=Rows("SELECT * FROM connection_days ORDER BY host,signature,day"),rules=new{config.baseline_days,config.rarity_window_days,config.rare_max_active_days,config.long_gap_days,config.cooldown_hours}},new JsonSerializerOptions{WriteIndented=true}));
+        File.WriteAllText(temp,JsonSerializer.Serialize(new{generated_utc=Stamp(DateTimeOffset.UtcNow),devices=Rows("SELECT * FROM devices ORDER BY host"),connections=Rows("SELECT * FROM connections ORDER BY host,ip,port,process"),destination_days=Rows("SELECT * FROM destination_days ORDER BY host,ip,day"),connection_days=Rows("SELECT * FROM connection_days ORDER BY host,signature,day"),rules=new{config.baseline_days,config.rarity_window_days,config.rare_max_active_days,config.long_gap_days,config.cooldown_hours,config.alert_udp_endpoints},udp_endpoints=Rows("SELECT * FROM udp_endpoints ORDER BY host,local_port"),udp_endpoint_days=Rows("SELECT * FROM udp_endpoint_days ORDER BY host,signature,day")},new JsonSerializerOptions{WriteIndented=true}));
         File.Move(temp,full,true);
     }
     public void Dispose()=>state.Dispose();

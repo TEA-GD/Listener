@@ -37,8 +37,8 @@ From the existing repository root:
 ```bash
 git pull --ff-only
 bash Agent/build/build-linux.sh
-dpkg-deb -f Agent/output/watcher-agent_1.0.1_amd64.deb Version Depends
-sudo apt install ./Agent/output/watcher-agent_1.0.1_amd64.deb
+dpkg-deb -f Agent/output/watcher-agent_1.0.2_amd64.deb Version Depends
+sudo apt install ./Agent/output/watcher-agent_1.0.2_amd64.deb
 ```
 
 APT installs the declared dependencies from your configured repositories. If it
@@ -83,7 +83,7 @@ After building:
 
 ```bash
 python tests/test_linux_package.py
-apt-get -s install ./Agent/output/watcher-agent_1.0.1_amd64.deb
+apt-get -s install ./Agent/output/watcher-agent_1.0.2_amd64.deb
 ```
 
 Tests extract the package without installing it, check service/script paths and

@@ -1,19 +1,25 @@
-param([string]$AgentScript,[string]$ConfigPath,[ValidateSet('Collect','Send','Checks','Continuous')][string]$Mode='Checks')
+param([string]$AgentScript,[string]$ConfigPath,[ValidateSet('Collect','Send','Checks','Continuous','Udp','UdpContinuous')][string]$Mode='Checks')
 $ErrorActionPreference='Stop'
 . $AgentScript -ConfigPath $ConfigPath
 function Get-CimInstance { param($ClassName) [pscustomobject]@{ProcessId=4884;Name='server-process.exe';ExecutablePath='C:\Services\server-process.exe'} }
+function Get-NetUDPEndpoint {
+    if ($Mode -notin @('Udp','UdpContinuous')) { return }
+    if ($Mode -eq 'Udp' -or $script:sample -le 2) { [pscustomobject]@{LocalAddress='0.0.0.0';LocalPort=5353;OwningProcess=4884} }
+    if ($Mode -eq 'UdpContinuous' -and $script:sample -in @(2,3)) { [pscustomobject]@{LocalAddress='::';LocalPort=9999;OwningProcess=4884} }
+}
 $script:sample = 0
 function Get-NetTCPConnection {
     param($State)
     $script:sample++
+    if ($Mode -in @('Udp','UdpContinuous')) { return }
     if ($Mode -eq 'Continuous' -and $script:sample -ge 3) { return }
     $remotePort=443
     if ($Mode -eq 'Continuous' -and $script:sample -eq 2) { $remotePort=8443 }
     [pscustomobject]@{LocalAddress='192.0.2.10';LocalPort=57224;RemoteAddress='203.0.113.20';RemotePort=$remotePort;OwningProcess=4884}
     [pscustomobject]@{LocalAddress='127.0.0.1';LocalPort=57225;RemoteAddress='127.0.0.1';RemotePort=443;OwningProcess=4884}
 }
-if ($Mode -eq 'Collect') { exit (Invoke-ServerAgent $ConfigPath $true) }
-if ($Mode -eq 'Continuous') { exit (Invoke-ServerAgent $ConfigPath $false) }
+if ($Mode -in @('Collect','Udp')) { exit (Invoke-ServerAgent $ConfigPath $true) }
+if ($Mode -in @('Continuous','UdpContinuous')) { exit (Invoke-ServerAgent $ConfigPath $false) }
 $config = Read-AgentConfig $ConfigPath
 if ($Mode -eq 'Send') { $sent=Send-Spool $config; Write-Host "SENT=$sent"; exit 0 }
 foreach ($file in Get-ChildItem (Split-Path $AgentScript) -Filter '*.ps1') {

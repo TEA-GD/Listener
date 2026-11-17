@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 ROOT=Path(__file__).resolve().parents[1]
-PACKAGE=ROOT/'Agent/output/watcher-agent_1.0.1_amd64.deb'
+PACKAGE=ROOT/'Agent/output/watcher-agent_1.0.2_amd64.deb'
 
 class LinuxPackage(unittest.TestCase):
     def test_metadata_and_service_layout(self):
@@ -31,7 +31,8 @@ class LinuxPackage(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='watcher-package-smoke-') as temp:
             root=Path(temp)
             subprocess.run(['dpkg-deb','-x',str(PACKAGE),str(root/'extracted')],check=True)
-            with socket.socket() as listener:
+            with socket.socket() as listener, socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as udp:
+                udp.bind(('0.0.0.0',0));udp_port=udp.getsockname()[1]
                 listener.bind(('127.0.0.1',0));listener.listen();listener.settimeout(20)
                 config=root/'agent.json'
                 config.write_text(json.dumps({'agent_id':'linux-package-test','collector_host':'localhost',
@@ -56,6 +57,7 @@ class LinuxPackage(unittest.TestCase):
                 self.assertEqual(0,result.returncode,result.stdout+result.stderr)
                 self.assertIn('Acknowledged:',result.stdout)
                 self.assertTrue(any(e['EVENT_TYPE']=='HEARTBEAT' and e['MONITORED_HOST']=='linux-package-test' for e in received))
+                self.assertTrue(any(e['PROTOCOL']=='UDP' and e['SOURCE_PORT']==str(udp_port) and e['RECIEVER_IP']=='' and e['PORT_USED']=='' for e in received),'Packaged agent did not report live UDP endpoint')
                 self.assertEqual([],list((root/'spool').glob('*.json')))
 
 if __name__=='__main__':unittest.main(verbosity=2)

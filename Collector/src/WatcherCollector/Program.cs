@@ -295,7 +295,8 @@ internal static class Database
     };
     private static readonly Regex SafeHost = new(@"^[A-Za-z0-9_.-]{1,120}$", RegexOptions.Compiled);
     private static readonly HashSet<string> EventTypes = new(StringComparer.Ordinal) {
-        "ACTIVE_AT_START", "TCP_CONNECTED", "TCP_DISCONNECTED", "HEARTBEAT"
+        "ACTIVE_AT_START", "TCP_CONNECTED", "TCP_DISCONNECTED", "HEARTBEAT",
+        "UDP_ENDPOINT_AT_START", "UDP_ENDPOINT_OPENED", "UDP_ENDPOINT_CLOSED"
     };
     private static SqliteConnection Connect(string path)
     {
@@ -376,6 +377,9 @@ internal static class Database
         if (host is "." or ".." || !SafeHost.IsMatch(host)) throw new ArgumentException("Invalid MONITORED_HOST");
         if (!Guid.TryParseExact(eventId, "D", out _)) throw new ArgumentException("Invalid EVENT_ID GUID");
         if (!EventTypes.Contains(eventType)) throw new ArgumentException("Invalid EVENT_TYPE");
+        if (eventType.StartsWith("UDP_", StringComparison.Ordinal) &&
+            (Required(row, "PROTOCOL") != "UDP" || !int.TryParse(Required(row, "SOURCE_PORT"), out int localPort) || localPort is < 1 or > 65535))
+            throw new ArgumentException("UDP endpoint events require PROTOCOL UDP and a valid SOURCE_PORT");
         if (!timestamp.EndsWith('Z') && !timestamp.EndsWith("+00:00", StringComparison.Ordinal))
             throw new ArgumentException("TIMESTAMP_UTC must use UTC Z or +00:00");
         if (!DateTimeOffset.TryParse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.None, out var stamp) ||

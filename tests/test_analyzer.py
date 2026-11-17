@@ -30,10 +30,10 @@ class AnalyzerTests(unittest.TestCase):
         self.add('PC-win','203.0.113.30',35)
     def tearDown(self):self.temp.cleanup()
     def save_config(self):self.config_path.write_text(json.dumps(self.config))
-    def add(self,host,ip,days=0,seconds=0,kind='TCP_CONNECTED',port='443',process='browser.exe',os_name='Windows'):
+    def add(self,host,ip,days=0,seconds=0,kind='TCP_CONNECTED',port='443',process='browser.exe',os_name='Windows',protocol='TCP',local_port='50001'):
         event_id=str(uuid.uuid4());stamp=(self.now-dt.timedelta(days=days,seconds=seconds)).isoformat()
         row=dict.fromkeys(COLUMNS,'');row.update(EVENT_ID=event_id,EVENT_TYPE=kind,TIMESTAMP_UTC=stamp,MONITORED_HOST=host,
-            RECIEVER_IP=ip,PORT_USED=port,PROCESS_NAME=process,SOFTWARE_THAT_USED='/programs/'+process,PROTOCOL='TCP',OPERATING_SYSTEM=os_name,SOURCE_IP='192.0.2.10',SOURCE_PORT='50001')
+            RECIEVER_IP=ip,PORT_USED=port,PROCESS_NAME=process,SOFTWARE_THAT_USED='/programs/'+process,PROTOCOL=protocol,OPERATING_SYSTEM=os_name,SOURCE_IP='192.0.2.10',SOURCE_PORT=local_port)
         with sqlite3.connect(self.source) as db:db.execute('INSERT INTO events VALUES('+','.join('?' for _ in range(len(COLUMNS)+3))+')',[row[c] for c in COLUMNS]+[host,stamp[:10],stamp])
         return event_id
     def run_analyzer(self,expected=0,report=False):
@@ -122,6 +122,25 @@ class AnalyzerTests(unittest.TestCase):
         event=self.add('PC-win','203.0.113.81',seconds=5);self.run_analyzer()
         self.add('PC-win','203.0.113.82',seconds=30);self.run_analyzer()
         self.assertEqual([event],[a['event_id'] for a in self.alerts()])
+
+    def test_udp_local_profiles_opt_in_alerts_and_known_peers(self):
+        self.run_analyzer()
+        self.add('PC-win','',seconds=60,kind='UDP_ENDPOINT_AT_START',protocol='UDP',local_port='5353',port='')
+        self.run_analyzer(report=True);self.assertEqual([],self.alerts())
+        report=json.loads((self.root/'report.json').read_text())
+        self.assertEqual('5353',report['udp_endpoints'][0]['local_port'])
+        with sqlite3.connect(self.root/'state/profiles.db') as db:
+            self.assertEqual(0,db.execute("SELECT COUNT(*) FROM destinations WHERE ip='' OR ip='0.0.0.0'").fetchone()[0])
+        self.config['alert_udp_endpoints']=True;self.save_config()
+        local=self.add('PC-win','',seconds=50,kind='UDP_ENDPOINT_OPENED',protocol='UDP',local_port='9999',port='')
+        peer=self.add('PC-linux','203.0.113.77',seconds=40,kind='UDP_ENDPOINT_OPENED',protocol='UDP',local_port='50002')
+        self.add('PC-win','',seconds=30,kind='UDP_ENDPOINT_CLOSED',protocol='UDP',local_port='9999',port='')
+        self.run_analyzer();rows={a['event_id']:a for a in self.alerts()}
+        self.assertEqual(2,len(rows));self.assertEqual(['new_udp_endpoint'],rows[local]['reasons'])
+        self.assertEqual('',rows[local]['destination_ip']);self.assertEqual('9999',rows[local]['source_port'])
+        self.assertTrue(rows[local]['local_endpoint']);self.assertIn('remote peer unavailable',rows[local]['message'])
+        self.assertIn('new_destination',rows[peer]['reasons']);self.assertEqual('UDP',rows[peer]['protocol'])
+        self.assertFalse(rows[peer]['local_endpoint']);self.assertIn('configured',rows[peer]['message'])
 
     def test_source_replacement_is_not_silently_accepted(self):
         self.run_analyzer()

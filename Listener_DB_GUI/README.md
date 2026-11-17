@@ -141,3 +141,11 @@ default. Configure `LISTENER_MAIL_VIEW_TOKEN` or a protected
 key in the mail page. `Start-Windows.ps1 -MailViewKeyFile <path>` selects a file.
 Use a separate read key from the receiver's write key and trusted HTTPS for
 remote access. Bodies/HTML sources/filenames render as inert plain text.
+
+## UDP events
+
+Protocol and Local port columns, protocol/event-type filters and local-port
+statistics support UDP endpoint observations. Known configured peers can appear
+on the New & rare connections board; peerless bindings cannot. UDP endpoint
+counts are event counts, not live sockets or packet counts. See
+[UDP behavior and upgrade order](../Agent/UDP.md).

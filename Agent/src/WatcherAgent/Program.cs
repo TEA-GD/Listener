@@ -9,9 +9,9 @@ using System.Text.RegularExpressions;
 namespace WatcherAgent;
 
 internal sealed record Connection(string LocalIP, int LocalPort, string RemoteIP,
-                                  int RemotePort, int PID, string Process, string Software)
+                                  int RemotePort, int PID, string Process, string Software, string Protocol = "TCP", string SocketState = "ESTABLISHED")
 {
-    public string Key => string.Join("\u001f", LocalIP, LocalPort, RemoteIP, RemotePort, PID);
+    public string Key => string.Join("\u001f", LocalIP, LocalPort, RemoteIP, RemotePort, PID, Protocol);
 }
 
 internal static class Program
@@ -23,13 +23,26 @@ internal static class Program
         [Console]::OutputEncoding=New-Object System.Text.UTF8Encoding($false)
         $procs=@{}
         Get-CimInstance Win32_Process | ForEach-Object { $procs[[int]$_.ProcessId] = @{Name=[string]$_.Name;Path=[string]$_.ExecutablePath} }
-        $rows=@(Get-NetTCPConnection -State Established | ForEach-Object {
+        $tcp=@()
+        try { $tcp=@(Get-NetTCPConnection -State Established -ErrorAction Stop) }
+        catch { if ($_.FullyQualifiedErrorId -notlike 'CmdletizationQuery_NotFound*') { throw } }
+        $rows=@($tcp | ForEach-Object {
           $p=$procs[[int]$_.OwningProcess]
           [PSCustomObject]@{local_ip=[string]$_.LocalAddress;local_port=[int]$_.LocalPort;
            remote_ip=[string]$_.RemoteAddress;remote_port=[int]$_.RemotePort;
-           pid=[int]$_.OwningProcess;process=[string]$p.Name;software=[string]$p.Path}
+           pid=[int]$_.OwningProcess;process=[string]$p.Name;software=[string]$p.Path;protocol='TCP';socket_state='ESTABLISHED'}
         })
-        ConvertTo-Json -InputObject $rows -Compress -Depth 3
+        if (__COLLECT_UDP__) {
+          $udp=@()
+          try { $udp=@(Get-NetUDPEndpoint -ErrorAction Stop) }
+          catch { if ($_.FullyQualifiedErrorId -notlike 'CmdletizationQuery_NotFound*') { throw } }
+          $rows+=@($udp | ForEach-Object {
+            $p=$procs[[int]$_.OwningProcess]
+            [PSCustomObject]@{local_ip=[string]$_.LocalAddress;local_port=[int]$_.LocalPort;
+             remote_ip='';remote_port=0;pid=[int]$_.OwningProcess;process=[string]$p.Name;software=[string]$p.Path;protocol='UDP';socket_state='BOUND'}
+          })
+        }
+        ConvertTo-Json -InputObject @($rows) -Compress -Depth 3
         """;
 
     private static int Main(string[] args)
@@ -82,18 +95,18 @@ internal static class Program
             var snapshot = DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmssfffZ", CultureInfo.InvariantCulture);
             try
             {
-                var current = Collect();
+                var current = Collect(cfg.collect_udp);
                 var changes = new List<(string Event, Connection Connection)>();
                 if (previous is null)
                 {
-                    changes.AddRange(current.Values.Select(c => ("ACTIVE_AT_START", c)));
+                    changes.AddRange(current.Values.Select(c => (c.Protocol == "UDP" ? "UDP_ENDPOINT_AT_START" : "ACTIVE_AT_START", c)));
                 }
                 else
                 {
                     foreach (var pair in current)
-                        if (!previous.ContainsKey(pair.Key)) changes.Add(("TCP_CONNECTED", pair.Value));
+                        if (!previous.ContainsKey(pair.Key)) changes.Add((pair.Value.Protocol == "UDP" ? "UDP_ENDPOINT_OPENED" : "TCP_CONNECTED", pair.Value));
                     foreach (var pair in previous)
-                        if (!current.ContainsKey(pair.Key)) changes.Add(("TCP_DISCONNECTED", pair.Value));
+                        if (!current.ContainsKey(pair.Key)) changes.Add((pair.Value.Protocol == "UDP" ? "UDP_ENDPOINT_CLOSED" : "TCP_DISCONNECTED", pair.Value));
                 }
                 // Fail before adding any events if the spool lacks space for the batch.
                 // Do not advance the baseline on failures; retry next iteration.
@@ -126,13 +139,14 @@ internal static class Program
         } while (true);
     }
 
-    private static Dictionary<string, Connection> Collect()
+    private static Dictionary<string, Connection> Collect(bool collectUdp = true)
     {
-        var entries = OperatingSystem.IsWindows() ? CollectWindows() : CollectLinux();
+        var entries = OperatingSystem.IsWindows() ? CollectWindows(collectUdp) : CollectLinux(collectUdp);
         var output = new Dictionary<string, Connection>(StringComparer.Ordinal);
         foreach (var c in entries)
         {
-            if (c.RemoteIP is "127.0.0.1" or "::1" or "" || c.LocalIP.Length == 0) continue;
+            if (c.LocalIP.Length == 0 || (c.Protocol == "TCP" && c.RemoteIP.Length == 0) ||
+                (IPAddress.TryParse(c.RemoteIP, out var remote) && IPAddress.IsLoopback(remote))) continue;
             output[c.Key] = c;
         }
         return output;
@@ -163,9 +177,14 @@ internal static class Program
         return stdout.Result;
     }
 
-    private static IEnumerable<Connection> CollectWindows()
+    private static IEnumerable<Connection> CollectWindows(bool collectUdp)
     {
-        string data = RunCommand("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", WindowsQuery);
+        string data = RunCommand("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", WindowsQuery.Replace("__COLLECT_UDP__", collectUdp ? "$true" : "$false", StringComparison.Ordinal));
+        return ParseWindowsConnections(data);
+    }
+
+    private static IEnumerable<Connection> ParseWindowsConnections(string data)
+    {
         using JsonDocument doc = JsonDocument.Parse(data);
         if (doc.RootElement.ValueKind != JsonValueKind.Array) throw new FormatException("Unexpected PowerShell output");
         var output = new List<Connection>();
@@ -177,7 +196,8 @@ internal static class Program
                 !int.TryParse(Str(item, "remote_port"), out int rp)) continue;
             int.TryParse(Str(item, "pid"), out int pid);
             output.Add(new(local, lp, remote, rp, pid,
-                           Str(item, "process", "Unknown"), Str(item, "software")));
+                           Str(item, "process", "Unknown"), Str(item, "software"),
+                           Str(item, "protocol", "TCP"), Str(item, "socket_state", "ESTABLISHED")));
         }
         return output;
     }
@@ -188,18 +208,26 @@ internal static class Program
         return p.ToString();
     }
 
-    private static IEnumerable<Connection> CollectLinux()
+    private static IEnumerable<Connection> CollectLinux(bool collectUdp)
     {
-        string data = RunCommand("ss", "-H", "-n", "-t", "-p", "state", "established");
+        var rows = ParseLinuxConnections(RunCommand("ss", "-H", "-n", "-t", "-p", "state", "established"), "TCP").ToList();
+        if (collectUdp) rows.AddRange(ParseLinuxConnections(RunCommand("ss", "-H", "-n", "-u", "-a", "-p"), "UDP"));
+        return rows;
+    }
+
+    private static IEnumerable<Connection> ParseLinuxConnections(string data, string protocol)
+    {
         var output = new List<Connection>();
         foreach (var line in data.Split('\n'))
         {
             var words = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
             if (words.Length < 4) continue;
             int i = words[0].Equals("ESTAB", StringComparison.OrdinalIgnoreCase) ||
-                    words[0].Equals("ESTABLISHED", StringComparison.OrdinalIgnoreCase) ? 3 : 2;
+                    words[0].Equals("ESTABLISHED", StringComparison.OrdinalIgnoreCase) ||
+                    words[0].Equals("UNCONN", StringComparison.OrdinalIgnoreCase) ||
+                    words[0].Equals("UNCONNECTED", StringComparison.OrdinalIgnoreCase) ? 3 : 2;
             if (words.Length <= i + 1 || !Endpoint(words[i], out string lip, out int lp) ||
-                !Endpoint(words[i + 1], out string rip, out int rp)) continue;
+                !Endpoint(words[i + 1], out string rip, out int rp, protocol == "UDP")) continue;
             string details = string.Join(" ", words.Skip(i + 2));
             var match = LinuxProc.Match(details);
             int pid = match.Success ? int.Parse(match.Groups["pid"].Value, CultureInfo.InvariantCulture) : 0;
@@ -210,16 +238,19 @@ internal static class Program
                 try { software = File.ResolveLinkTarget($"/proc/{pid}/exe", true)?.FullName ?? ""; }
                 catch (Exception) { /* Process may have exited or be inaccessible. */ }
             }
-            output.Add(new(lip, lp, rip, rp, pid, name, software));
+            if (protocol == "UDP" && (rp == 0 || rip is "*" or "0.0.0.0" or "::")) { rip = ""; rp = 0; }
+            output.Add(new(lip, lp, rip, rp, pid, name, software, protocol,
+                protocol == "UDP" ? (rip.Length > 0 ? "PEER_CONFIGURED" : "BOUND") : "ESTABLISHED"));
         }
         return output;
     }
 
-    private static bool Endpoint(string token, out string ip, out int port)
+    private static bool Endpoint(string token, out string ip, out int port, bool allowWildcard = false)
     {
         ip = ""; port = 0;
         int pos = token.LastIndexOf(':');
-        if (pos < 1 || !int.TryParse(token[(pos + 1)..], out port)) return false;
+        if (pos < 1) return false;
+        if (!(allowWildcard && token[(pos + 1)..] == "*") && !int.TryParse(token[(pos + 1)..], out port)) return false;
         ip = token[..pos].Trim('[', ']');
         return ip.Length > 0;
     }
@@ -239,11 +270,11 @@ internal static class Program
             ["PROCESS_ID"] = c is null ? "" : c.PID.ToString(CultureInfo.InvariantCulture),
             ["RECIEVER_IP"] = c?.RemoteIP ?? "",
             ["RECIEVER_DOMAINNAME"] = "",
-            ["PORT_USED"] = c is null ? "" : c.RemotePort.ToString(CultureInfo.InvariantCulture),
+            ["PORT_USED"] = c is null || c.RemotePort == 0 ? "" : c.RemotePort.ToString(CultureInfo.InvariantCulture),
             ["SOFTWARE_THAT_USED"] = c?.Software ?? "",
             ["SOURCE_PORT"] = c is null ? "" : c.LocalPort.ToString(CultureInfo.InvariantCulture),
-            ["PROTOCOL"] = c is null ? "" : "TCP",
-            ["STATE"] = type == "TCP_DISCONNECTED" ? "CLOSED_OR_NOT_OBSERVED" : c is null ? "" : "ESTABLISHED",
+            ["PROTOCOL"] = c?.Protocol ?? "",
+            ["STATE"] = type is "TCP_DISCONNECTED" or "UDP_ENDPOINT_CLOSED" ? "CLOSED_OR_NOT_OBSERVED" : c?.SocketState ?? "",
             ["OPERATING_SYSTEM"] = isLinux ? "Linux" : "Windows",
             ["MONITORED_HOST"] = agentId,
             ["SNAPSHOT_ID"] = snapshot

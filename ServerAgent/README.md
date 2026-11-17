@@ -2,10 +2,10 @@
 
 A standalone PowerShell 5.1 script with a Task Scheduler registration helper.
 No MSI, GUI installer, .NET SDK/runtime installation, Python or service is needed
-on the server. Uses built-in Windows PowerShell, CIM and Get-NetTCPConnection.
+on the server. Uses built-in Windows PowerShell, CIM, Get-NetTCPConnection and Get-NetUDPEndpoint.
 Target: Windows Server 2016 or newer with Windows PowerShell 5.1.
 
-This module collects **TCP connection/process metadata only**, as requested.
+This module collects **TCP connection/process metadata and UDP endpoint metadata**, as requested.
 It does not collect Security/System logs, AD logons, directory objects, credentials
 or packet contents. It sends the same event format as the existing agent, so
 collector SQLite columns, CSV exports and Listener_DB_GUI work without changes.
@@ -138,3 +138,12 @@ SQLite/CSV storage, replay deduplication and continuous connection transitions.
 These tests do not execute Windows Task Scheduler or reboot a Windows server.
 Validate startup and actual process visibility on a target Windows server before
 rolling out to more servers/DCs.
+
+## UDP endpoints
+
+UDP is enabled by default (`collect_udp: true`, optional for older configs).
+Windows records local IP/port and owning process, with unknown remote fields
+left empty. New UDP_ENDPOINT_AT_START/OPENED/CLOSED events require the updated
+collector. See [UDP.md](../Agent/UDP.md) before upgrading. Existing explicit
+collect_udp choices survive registration updates. Set false and restart the
+task for TCP-only collection. Delivery remains TCP with matching ACKs.

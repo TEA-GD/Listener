@@ -144,3 +144,22 @@ in Chromium; no Thunderbird binary/mail server is available in this environment.
 Actual installation/new-mail reception, encrypted mail and domain TLS/startup
 remain deployment checks. The XPI is a deterministic internal unsigned package;
 its contents match the included extension sources, without keys or message data.
+
+## TCP + UDP socket monitoring
+
+Added optional-by-config (default on) UDP endpoint snapshots to compiled
+Windows/Linux agents and PowerShell ServerAgent. Windows uses Get-NetUDPEndpoint
+with empty remote fields; Linux ss -u -a can expose configured peers. Dedicated
+UDP endpoint event types preserve connectionless semantics. Collector/CSV keep
+the existing columns; UDP source-port/protocol validation prevents malformed
+endpoint records. GUI adds protocol/local-port views and known-peer filtering.
+Analyzer profiles all UDP bindings separately, with peerless-binding alerts
+opt-in and known-peer notifications worded as configuration observations.
+
+Tests exercise real Linux bound/configured UDP sockets without sending datagrams,
+Windows/PowerShell mocks, actual collector ACK/SQLite/CSV, protocol/IPv6/wildcard
+parsing, UDP UI/API and analysis with no invented destination. A PowerShell
+ConnectAsync VoidTaskResult leak discovered by the UDP tests is explicitly
+suppressed so the delivery count remains numeric. Debian agent package version
+is 1.0.2. Windows cmdlet/runtime/deployment checks remain outstanding on target
+machines. Update collector before agents; transport remains TCP/ACK, not UDP.

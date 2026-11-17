@@ -221,3 +221,14 @@ behavior, delayed records, source replacement protection, unavailable-share-path
 retry, profile export and unchanged source DB bytes. Real SMB permissions,
 Windows startup and sustained production-volume performance remain deployment
 checks. No alerts are sent to real recipients during development tests.
+
+## UDP support
+
+UDP_ENDPOINT_AT_START/OPENED/CLOSED records build local endpoint profiles in
+udp_endpoints/udp_endpoint_days. Configured peers, when available, also use the
+destination/combination rules. Unknown peers remain empty and never become new
+destination IPs. Optional `alert_udp_endpoints: true` enables local-binding
+new/rare/returned alerts; default false avoids ephemeral-port noise. Their
+payloads include source_ip/source_port and local_endpoint=true, explicitly
+stating the remote peer is unavailable. Existing state is upgraded additively.
+See [UDP.md](../Agent/UDP.md) for platform limits and upgrade order.
