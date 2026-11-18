@@ -116,21 +116,24 @@ internal sealed class InstallerForm : Form
         Controls.Add(close);
         CancelButton = close;
         string config = Path.Combine(DataDir, "agent.json");
-        if (File.Exists(config))
+        try
         {
-            try
+            string? existing=ReadExistingConfiguration(config,Log);
+            if(existing is not null)
             {
-                var saved = JsonSerializer.Deserialize<AgentConfig>(File.ReadAllText(config));
-                if (saved is not null)
-                {
-                    saved.ValidateCollector();
-                    _collectorHost.Text = saved.collector_host;
-                    _collectorPort.Value = saved.collector_port;
-                    _agentId.Text = saved.agent_id;
-                    _collectUdp.Checked = saved.collect_udp;
-                }
+                var saved=JsonSerializer.Deserialize<AgentConfig>(existing)
+                    ??throw new InvalidDataException("Existing agent.json is empty or invalid.");
+                saved.ValidateCollector();
+                _collectorHost.Text=saved.collector_host;
+                _collectorPort.Value=saved.collector_port;
+                _agentId.Text=saved.agent_id;
+                _collectUdp.Checked=saved.collect_udp;
             }
-            catch (Exception ex) { Log("Could not load previous settings: " + ex.Message); }
+        }
+        catch(Exception ex)
+        {
+            _install.Enabled=false;
+            Log("Update blocked to preserve existing settings: "+ex.Message);
         }
     }
 
@@ -298,50 +301,74 @@ internal sealed class InstallerForm : Form
         using var embedded = Assembly.GetExecutingAssembly().GetManifestResourceStream("Watcher.Agent.Payload")
             ?? throw new IOException("The agent is not embedded in this installer. Build the WatcherInstaller project using build-windows.ps1; do not run the WatcherAgent executable directly.");
 
-        log("Agent payload found. Preparing installation directories.");
+        log("Agent payload found. Repairing installation permissions.");
         Directory.CreateDirectory(AppDir);
-        Directory.CreateDirectory(DataDir);
-        string spool = Path.Combine(DataDir, "spool");
-        Directory.CreateDirectory(spool);
+        InstallationFiles.ProtectDirectory(DataDir,Run);
+        string config=Path.Combine(DataDir,"agent.json");
+        InstallationFiles.ProtectConfiguration(config,Run);
+        string? existing=ReadExistingConfiguration(config,log);
+        string defaultSpool=Path.Combine(DataDir,"spool");
+        string newSettings=InstallationFiles.MergeConfiguration(existing,agentId,collectorHost,collectorPort,collectUdp,defaultSpool);
+        var cfg=JsonSerializer.Deserialize<AgentConfig>(newSettings)!;
+        // Preserve a configured custom spool; never enumerate/delete pending files during update.
+        if(Path.GetFullPath(cfg.spool_dir).Equals(Path.GetFullPath(defaultSpool),StringComparison.OrdinalIgnoreCase))
+            InstallationFiles.ProtectDirectory(defaultSpool,Run);
+        else Directory.CreateDirectory(cfg.spool_dir);
+        log("Preserved spool directory: "+cfg.spool_dir);
 
-        // Protect configuration and spool (Administrator/SYSTEM only).
-        Run("icacls.exe", DataDir, "/inheritance:r", "/grant:r",
-            "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "/T");
-        log("Protected ProgramData directory (Administrators and SYSTEM only).");
-
-        string agentExe = Path.Combine(AppDir, "WatcherAgent.exe");
-        // Stop the prior startup task before replacing an already-running agent.
-        RunAllowFailure("schtasks.exe", "/End", "/TN", TaskName);
-        bool copied = false;
-        for (int i = 0; i < 15; i++)
+        string agentExe=Path.Combine(AppDir,"WatcherAgent.exe");
+        bool previousTask=TaskExists(),installed=false;
+        try
         {
-            try
+            RunAllowFailure("schtasks.exe","/End","/TN",TaskName);
+            StopInstalledAgent(agentExe);
+            // Stage and flush complete files before replacement. A failed write leaves
+            // the previous executable/config intact rather than truncating it.
+            InstallationFiles.WriteAtomically(agentExe,embedded);
+            log("Installed agent binary to "+agentExe);
+            using var settingsStream=new MemoryStream(new UTF8Encoding(false).GetBytes(newSettings));
+            InstallationFiles.WriteAtomically(config,settingsStream);
+            log("Updated protected configuration: "+config);
+
+            string taskCommand=$"\"{agentExe}\" --config \"{config}\"";
+            Run("schtasks.exe","/Create","/TN",TaskName,"/SC","ONSTART","/RU","SYSTEM",
+                "/RL","HIGHEST","/TR",taskCommand,"/F");
+            Run("schtasks.exe","/Run","/TN",TaskName);
+            installed=true;
+            log("Created and started Windows task: "+TaskName);
+        }
+        finally
+        {
+            if(!installed&&previousTask)
             {
-                embedded.Position = 0;
-                using var output = new FileStream(agentExe, FileMode.Create, FileAccess.Write, FileShare.None);
-                embedded.CopyTo(output);
-                copied = true;
-                break;
-            }
-            catch (IOException) when (i < 14)
-            {
-                Thread.Sleep(400);
+                log("Update did not finish. Preserved settings and queued events; attempting to restart the existing task.");
+                RunAllowFailure("schtasks.exe","/Run","/TN",TaskName);
             }
         }
-        if (!copied) throw new IOException("Could not replace WatcherAgent.exe; verify the existing task/process is stopped.");
-        log("Installed agent binary to " + agentExe);
+    }
 
-        string config = Path.Combine(DataDir, "agent.json");
-        var cfg = new AgentConfig { agent_id = agentId, spool_dir = spool, collector_host = collectorHost, collector_port = collectorPort, collect_udp = collectUdp };
-        File.WriteAllText(config, JsonSerializer.Serialize(cfg, new JsonSerializerOptions { WriteIndented = true }),
-            new UTF8Encoding(false));
-        log("Wrote secured configuration: " + config);
+    private static string? ReadExistingConfiguration(string config,Action<string> log)
+    {
+        try{return File.ReadAllText(config);}
+        catch(FileNotFoundException){return null;}
+        catch(DirectoryNotFoundException){return null;}
+        catch(UnauthorizedAccessException)
+        {
+            log("Repairing access to existing agent.json before loading saved settings.");
+            InstallationFiles.ProtectDirectory(DataDir,Run);
+            InstallationFiles.ProtectConfiguration(config,Run);
+            return File.ReadAllText(config);
+        }
+    }
 
-        string taskCommand = $"\"{agentExe}\" --config \"{config}\"";
-        Run("schtasks.exe", "/Create", "/TN", TaskName, "/SC", "ONSTART", "/RU", "SYSTEM",
-            "/RL", "HIGHEST", "/TR", taskCommand, "/F");
-        Run("schtasks.exe", "/Run", "/TN", TaskName);
-        log("Created and started Windows task: " + TaskName);
+    private static void StopInstalledAgent(string agentExe)
+    {
+        string safePath=agentExe.Replace("'","''");
+        string ps="$ErrorActionPreference='Stop'; $target='"+safePath+"'; "+
+            "Get-CimInstance Win32_Process -Filter \"Name = 'WatcherAgent.exe'\" | "+
+            "Where-Object { $_.ExecutablePath -ieq $target } | "+
+            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop }";
+        Run("powershell.exe","-NoProfile","-NonInteractive","-Command",ps);
     }
 
     private static void RunAllowFailure(string exe, params string[] args)

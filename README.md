@@ -320,3 +320,7 @@ first, then agents, GUI and analyzer. Metadata delivery remains TCP/ACK on port
 The database GUI now includes an hourly connections-per-minute chart, observed device IP addresses, and a paged table of latest reported connections/peers when a device is selected. It refreshes every ten seconds and labels stale, incomplete and missing snapshots. [Details and upgrade instructions](Listener_DB_GUI/README.md#device-overview-rate-addresses-and-current-reported-connections).
 
 Upgrade in this order: **Collector → agents (compiled Agent or ServerAgent) → dashboard**. Rebuild the components with `Build-Windows-All.bat` before replacing installed binaries. The updated agents send new snapshot event types; old Collectors cannot accept those types. Older agents still send their original events to the new Collector, but their current-connections view requires an agent update. Snapshot reporting increases event/CSV storage; no existing database records are deleted.
+
+## Agent update permission fix
+
+The current Agent installer repairs legacy `agent.json` permissions/read-only flags and replaces files atomically while preserving the configured spool and unsent events. Rebuild `Agent/build/Build-Windows.bat`, then run the new `WatcherInstaller.exe` as administrator and choose **Install / Update**. Uninstalling or deleting ProgramData is not required. [Update details and Windows regression checks](Agent/README.md#updating-without-uninstalling).
