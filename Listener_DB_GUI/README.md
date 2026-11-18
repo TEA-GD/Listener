@@ -24,10 +24,8 @@ the application; an empty database gives an empty PC list.
    NuGet source `https://api.nuget.org/v3/index.json` for building.
 2. Run `Listener_DB_GUI/Build-Windows.bat`, or open
    `Listener_DB_GUI.sln` in Visual Studio and publish the web project.
-3. Run `Listener_DB_GUI/Start-Windows.bat` on the collector PC. The collector
-   protects ProgramData for Administrators/SYSTEM, so run the launcher as
-   Administrator if access is denied.
-4. Keep the console open and open `http://127.0.0.1:5080` in a browser.
+3. Run `Listener_DB_GUI/Launch-Windows.bat` (or `Start-Windows.bat` without arguments) on the GUI/collector PC. Choose **Local only** or **Domain network**, the database path, and port. Run as Administrator if the protected database requires it.
+4. Click **Start GUI**. Keep the new server console open. Use the displayed local URL, or share the server URL in Domain mode.
 5. Click a computer on the left, then use filters or View on an event.
 
 The launcher uses the published executable if available, otherwise runs the
@@ -79,10 +77,7 @@ The viewer opens short read connections while the collector continues writing.
 The query results of a refresh may reflect slightly different instants as new
 events arrive.
 
-The dashboard has **no login** and defaults to loopback. It displays internal
-network/process metadata; do not expose it directly to an untrusted network.
-For access from other PCs, put it behind an authenticated HTTPS reverse proxy
-with appropriate firewall controls rather than opening the dashboard publicly.
+The dashboard defaults to loopback and has **no Windows/AD sign-in**. Domain mode makes it reachable over the network and can configure a Windows Domain-profile firewall rule; that profile does not check each visitor's AD account. For account-based access, use an HTTPS reverse proxy with Windows Authentication. Mail endpoints retain their separate viewing-key requirement; use HTTPS for remote mail viewing.
 
 ## Validation
 
@@ -177,3 +172,45 @@ The frame shows process/PID, local and peer addresses/ports, last evidence time,
 **The view stays frozen until Capture latest minute is clicked again.** Paging and switching back from Overview retain the same capture. Incoming records, including late/backdated records, do not shift the frame: page requests reuse its UTC capture time and database row watermark. Selecting a different device creates a new frame. The global Refresh data button updates the device list/history without replacing an existing frame. This is an inspection view, not a permanent stored image or archive; deleting/replacing database history can affect old captures.
 
 Rebuild/restart `Listener_DB_GUI` to install this tab. Agents already sending complete snapshots need no additional protocol update. Older agents can show recent observations, but full current-state reporting requires the snapshot-capable Agent/ServerAgent and Collector described above. No mail/database schema change is required for this GUI feature.
+
+## Local or domain-network launcher
+
+Run **`Launch-Windows.bat`** to open the Windows mode selector. `Start-Windows.bat` without arguments opens the same dialog. The Windows publish script also copies the launcher files into `output/windows/`; copy that **whole folder**, including `wwwroot`, when deploying a built GUI.
+
+| Mode | Server listens on | URL for users |
+| --- | --- | --- |
+| Local only (default) | `http://127.0.0.1:5080` | Open on the same PC only |
+| Domain network | `http://0.0.0.0:5080` (all IPv4 interfaces) | `http://GUI-HOST.your-domain:5080` |
+
+The launcher derives the share URL from the server hostname and domain suffix. Use the port you choose in the dialog; 5080 is the default. The hostname must resolve to the GUI server from client PCs. Users need only a browser and network access to the server; the database and optional key file stay on the server.
+
+In Domain mode, **Configure Windows Firewall** creates/updates only `Listener-GUI-Domain-TCP-<port>`: inbound TCP on the selected port, Domain profile, any reachable client address. It does not open Private/Public profiles or edit AD/GPO objects. The dialog requests administrator elevation when this option is selected. If your administrator already manages the rule through GPO, clear the option and use the existing rule. Domain firewall rules require an active DomainAuthenticated network profile, and GPO policy can override local rules.
+
+**Domain network means network reachability, not AD-user authentication.** Anyone who can reach the permitted GUI port can view the connection dashboard. To require AD accounts, place it behind your authenticated HTTPS reverse proxy. Mail alerts still require the separately configured mail viewing key. Select a key file in the dialog if mail viewing is needed; no key is embedded in published output or browser URLs.
+
+The launcher opens a separate server console and, optionally, the local browser once the server responds. Keep that console open; Ctrl+C stops the GUI. Stop an existing GUI before changing modes on the same port. Local mode binds only to loopback even if a previous Domain firewall rule remains. To remove the persistent rule when it is no longer needed, run elevated:
+
+```powershell
+Remove-NetFirewallRule -Name 'Listener-GUI-Domain-TCP-5080'
+```
+
+For scripted startup, bypass the dialog by calling PowerShell directly, or pass arguments to `Start-Windows.bat`:
+
+```powershell
+# This PC only; no firewall changes:
+.\Start-Windows.ps1 -AccessMode Local -Port 5080
+
+# Reachable from domain-network PCs; run elevated to create the rule:
+.\Start-Windows.ps1 -AccessMode Domain -Port 5080 -ConfigureFirewall
+
+# Custom database and optional mail viewing key:
+.\Start-Windows.ps1 -AccessMode Domain -DatabasePath 'D:\Watcher\watcher-events.db' -MailViewKeyFile 'C:\ProgramData\WatcherMailReceiver\mail-view.key'
+```
+
+On a client PC, test the server URL/port if access fails:
+
+```powershell
+Test-NetConnection GUI-HOST.your-domain -Port 5080
+```
+
+Only the GUI host needs the server executable/database. Starting Domain mode does not redeploy agents or change their Collector address. Both local and network startup reuse the same read-only dashboard and existing features.

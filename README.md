@@ -326,3 +326,8 @@ Upgrade in this order: **Collector â†’ agents (compiled Agent or ServerAgent) â†
 The current Agent installer repairs legacy `agent.json` permissions/read-only flags and replaces files atomically while preserving the configured spool and unsent events. Rebuild `Agent/build/Build-Windows.bat`, then run the new `WatcherInstaller.exe` as administrator and choose **Install / Update**. Uninstalling or deleting ProgramData is not required. [Update details and Windows regression checks](Agent/README.md#updating-without-uninstalling).
 
 The dashboard's top **Last minute** tab provides a frozen 60-second connection frame for the selected device, including long-running sockets and connections closed during the minute. Capture timestamps and freshness are shown; use **Capture latest minute** for a new frame. [Usage](Listener_DB_GUI/README.md#last-minute-tab-a-frozen-connection-frame).
+
+
+## GUI launcher: local or domain-network access
+
+Run `Listener_DB_GUI/Launch-Windows.bat`, choose **Local only** or **Domain network**, and click **Start GUI**. Domain mode shows the URL other users can open and optionally configures the Windows Domain-profile inbound rule for the chosen port. This enables network access, not AD sign-in; mail viewing still requires its key. [Setup and command-line options](Listener_DB_GUI/README.md#local-or-domain-network-launcher).
