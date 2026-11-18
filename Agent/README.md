@@ -19,3 +19,14 @@ dotnet run --project tests/InstallerUpdate -c Release
 ```
 
 Run from the repository root in an elevated Windows terminal to exercise the actual explicit-deny NTFS ACL and sharing-lock checks. Portable preservation/replacement checks also run on Linux; Linux cannot validate the Windows ACL repair itself.
+
+## Launch and stop controls
+
+The Agent installer now has **Launch Agent** and **Stop Agent** buttons alongside Install / Update and Uninstall Agent, matching the Collector's start/stop workflow.
+
+- **Launch Agent** starts the existing `Watcher-Connection-Agent` scheduled task with the installed executable and saved `agent.json`. It does not apply unsaved setup-field edits. An already-running installed agent is left running, and the log reports whether the process could be confirmed. Starting the process does not confirm Collector delivery.
+- **Stop Agent** ends the startup task's current run and stops only a WatcherAgent process whose executable path matches the installed agent. It keeps the task registered, preserves configuration and unsent events, and verifies that the process stopped. The agent can start again with Launch Agent or at the next Windows startup.
+
+Commands run asynchronously, with other installer actions disabled until completion. Use the rebuilt installer elevated; an agent must already be installed before Launch Agent can work. These controls do not uninstall the agent or change monitoring settings.
+
+Portable lifecycle regression checks: `dotnet run --project tests/AgentControls -c Release`. Actual Task Scheduler/process control and button layout require verification on a Windows test PC.

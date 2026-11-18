@@ -36,6 +36,11 @@ internal sealed class InstallerForm : Form
     private readonly TextBox _log = new();
     private readonly Button _install = new();
     private readonly Button _uninstall = new();
+    private readonly Button _start = new();
+    private readonly Button _stop = new();
+    private readonly Button _close = new();
+    private bool _canInstall = true;
+    private bool _operationInProgress;
     private readonly CheckBox _deleteData = new();
     private readonly CheckBox _collectUdp = new();
 
@@ -102,19 +107,31 @@ internal sealed class InstallerForm : Form
         Controls.Add(_deleteData);
 
         _install.Text = "Install / Update";
-        _install.SetBounds(20, 575, 154, 36);
+        _install.SetBounds(20, 575, 140, 36);
         _install.Click += InstallClicked;
         Controls.Add(_install);
 
+        _start.Text = "Launch Agent";
+        _start.SetBounds(172, 575, 105, 36);
+        _start.Click += (_, _) => ExecuteAgentControl(true);
+        Controls.Add(_start);
+
+        _stop.Text = "Stop Agent";
+        _stop.SetBounds(289, 575, 100, 36);
+        _stop.Click += (_, _) => ExecuteAgentControl(false);
+        Controls.Add(_stop);
+
         _uninstall.Text = "Uninstall Agent";
-        _uninstall.SetBounds(190, 575, 156, 36);
+        _uninstall.SetBounds(401, 575, 140, 36);
         _uninstall.Click += UninstallClicked;
         Controls.Add(_uninstall);
 
-        var close = new Button { Text = "Close", DialogResult = DialogResult.Cancel };
-        close.SetBounds(553, 575, 91, 36);
-        Controls.Add(close);
-        CancelButton = close;
+        _close.Text = "Close";
+        _close.SetBounds(553, 575, 91, 36);
+        _close.Click += (_, _) => Close();
+        Controls.Add(_close);
+        CancelButton = _close;
+        FormClosing += (_, e) => { if (_operationInProgress) e.Cancel = true; };
         string config = Path.Combine(DataDir, "agent.json");
         try
         {
@@ -132,6 +149,7 @@ internal sealed class InstallerForm : Form
         }
         catch(Exception ex)
         {
+            _canInstall=false;
             _install.Enabled=false;
             Log("Update blocked to preserve existing settings: "+ex.Message);
         }
@@ -139,6 +157,7 @@ internal sealed class InstallerForm : Form
 
     private async void InstallClicked(object? sender, EventArgs e)
     {
+        if (_operationInProgress) return;
         string id = _agentId.Text.Trim();
         if (!Regex.IsMatch(id, @"^[A-Za-z0-9_.-]{1,120}$") || id is "." or "..")
         {
@@ -157,11 +176,7 @@ internal sealed class InstallerForm : Form
             return;
         }
 
-        _install.Enabled = false;
-        _uninstall.Enabled = false;
-        _deleteData.Enabled = false;
-        _agentId.Enabled = false;
-        _collectorHost.Enabled = _collectorPort.Enabled = _collectUdp.Enabled = false;
+        SetBusy(true);
         Log("Installing agent for " + id + " ...");
         try
         {
@@ -182,16 +197,13 @@ internal sealed class InstallerForm : Form
         }
         finally
         {
-            _install.Enabled = true;
-            _uninstall.Enabled = true;
-            _deleteData.Enabled = true;
-            _agentId.Enabled = true;
-            _collectorHost.Enabled = _collectorPort.Enabled = _collectUdp.Enabled = true;
+            SetBusy(false);
         }
     }
 
     private async void UninstallClicked(object? sender, EventArgs e)
     {
+        if (_operationInProgress) return;
         bool deleteData = _deleteData.Checked;
         string warning = "This removes the Watcher Agent startup task and installed executable.\n\n" +
             (deleteData
@@ -202,12 +214,12 @@ internal sealed class InstallerForm : Form
                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
             return;
 
-        _install.Enabled = _uninstall.Enabled = _deleteData.Enabled = _agentId.Enabled = false;
-        _collectorHost.Enabled = _collectorPort.Enabled = _collectUdp.Enabled = false;
+        SetBusy(true);
         Log("Uninstalling agent..." + (deleteData ? " (including local data)" : " (preserving local data)"));
         try
         {
             await Task.Run(() => Uninstall(deleteData, Log));
+            if (deleteData) _canInstall = true;
             Log("SUCCESS: Watcher Agent removed.");
             MessageBox.Show(this,
                 "Watcher Agent has been uninstalled.\n\n" +
@@ -223,9 +235,66 @@ internal sealed class InstallerForm : Form
         }
         finally
         {
-            _install.Enabled = _uninstall.Enabled = _deleteData.Enabled = _agentId.Enabled = true;
-            _collectorHost.Enabled = _collectorPort.Enabled = _collectUdp.Enabled = true;
+            SetBusy(false);
         }
+    }
+
+    private void SetBusy(bool busy)
+    {
+        _operationInProgress = busy;
+        _install.Enabled = !busy && _canInstall;
+        _start.Enabled = _stop.Enabled = _uninstall.Enabled = _close.Enabled = !busy;
+        _deleteData.Enabled = _agentId.Enabled = _collectorHost.Enabled = _collectorPort.Enabled = _collectUdp.Enabled = !busy;
+    }
+
+    private async void ExecuteAgentControl(bool launch)
+    {
+        if (_operationInProgress) return;
+        SetBusy(true);
+        try
+        {
+            await Task.Run(() => {
+                using var identity = WindowsIdentity.GetCurrent();
+                if (!new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator))
+                    throw new UnauthorizedAccessException("Run the installer as administrator to control the installed agent.");
+                var runtime = new InstalledAgentRuntime();
+                if (launch) AgentLifecycle.Launch(runtime, Log);
+                else AgentLifecycle.Stop(runtime, Log);
+            });
+        }
+        catch (Exception ex)
+        {
+            Log((launch ? "LAUNCH FAILED: " : "STOP FAILED: ") + ex.Message);
+            MessageBox.Show(this, ex.Message, "Watcher Agent control", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally { SetBusy(false); }
+    }
+
+    private sealed class InstalledAgentRuntime : IAgentRuntime
+    {
+        private readonly string _exe = Path.Combine(AppDir, "WatcherAgent.exe");
+        public bool IsInstalled => File.Exists(_exe) && File.Exists(Path.Combine(DataDir, "agent.json"));
+        public bool HasTask => TaskExists();
+        public bool IsRunning
+        {
+            get
+            {
+                foreach (var process in Process.GetProcessesByName("WatcherAgent"))
+                {
+                    using (process)
+                    {
+                        try { if (string.Equals(process.MainModule?.FileName, _exe, StringComparison.OrdinalIgnoreCase)) return true; }
+                        catch (InvalidOperationException) { /* Process exited during the query. */ }
+                        catch (System.ComponentModel.Win32Exception ex) { throw new IOException("Cannot verify the WatcherAgent process state. Check administrator permissions and process access.", ex); }
+                    }
+                }
+                return false;
+            }
+        }
+        public void StartTask() => Run("schtasks.exe", "/Run", "/TN", TaskName);
+        public void EndTask() => RunAllowFailure("schtasks.exe", "/End", "/TN", TaskName);
+        public void StopInstalledProcess() => StopInstalledAgent(_exe);
+        public void Pause(int milliseconds) => Thread.Sleep(milliseconds);
     }
 
     private static void Uninstall(bool deleteData, Action<string> log)
