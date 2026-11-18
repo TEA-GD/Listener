@@ -1,5 +1,7 @@
 # Watcher — TCP/UDP socket monitoring with a TCP collector
 
+**Current architecture and deployment scheme:** [SCHEME.md](SCHEME.md) — components, ports, database tables, snapshots, mail variants and local/domain GUI access.
+
 ## Integrated mail database and add-ons
 
 The updated Collector and both mail receivers automatically initialize **`email_alerts`** (full text) and **`email_metadata_alerts`** (date, sender, receiver, attachment flag and filenames). Initialization preserves existing data. All three default to `%ProgramData%\WatcherCollector\watcher-events.db`; set the same custom database path on all components if overriding it. The dashboard remains read-only.
@@ -49,7 +51,7 @@ An absent task/service and two `False` results indicate the installed components
 - `Collector/build/build-windows.ps1` — publishes a self-contained collector EXE, then embeds it in a self-contained GUI installer EXE.
 - `Agent/build/build-windows.ps1` — builds a self-contained GUI agent installer embedding the agent EXE.
 - `Agent/build/build-linux.sh` — creates a Debian 12/13 amd64 `.deb` (requires .NET 10 SDK, `dpkg-deb`).
-- `build-windows-all.ps1` — publishes both Windows installer EXEs.
+- `build-windows-all.ps1` — builds both Windows installers, Analyzer, GUI and launchers, both mail receivers, and both Thunderbird packages.
 
 The source compiles with the .NET 10 SDK on Windows. The collector uses NuGet packages `Microsoft.Data.Sqlite` and `Microsoft.Extensions.Hosting.WindowsServices` for storage and service hosting. NuGet access (or configured offline cache) is needed at build time, but the published executables include the .NET runtime.
 
@@ -205,7 +207,7 @@ These are **source files**, not compiled executables. If your machine has the .N
 
 ## Source review
 
-See [REVIEW.md](REVIEW.md) for architecture, deployment limitations, and the build/test results recorded when importing this source into TEA-GD/Listener.
+See [SCHEME.md](SCHEME.md) for the current architecture and deployment scheme. [REVIEW.md](REVIEW.md) preserves the review and build/test results recorded when importing this source into TEA-GD/Listener.
 
 ## SQLite columns and upgrading existing databases
 
