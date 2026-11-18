@@ -149,3 +149,5 @@ collect_udp choices survive registration updates. Set false and restart the
 task for TCP-only collection. Delivery remains TCP with matching ACKs.
 
 Queued events are transmitted with their original JSON values. PowerShell date parsing is used only while inspecting the event ID; delivery does not reserialize timestamps, so UTC is preserved even when the machine uses a non-UTC time zone.
+
+The ServerAgent also reports complete TCP/UDP snapshots on each configured heartbeat. Upgrade the Collector first to accept `TCP_SNAPSHOT` and `UDP_SNAPSHOT`. The dashboard reconstructs the latest reported sockets from a complete snapshot plus later open/close events. A zero-socket completion clears old state after restart. Custom heartbeat intervals longer than two minutes can make the dashboard's freshness indicator show stale between snapshots.

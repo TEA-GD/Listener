@@ -115,7 +115,7 @@ internal static class Program
                 var events = new List<Dictionary<string, string>>();
                 foreach (var (type, connection) in changes)
                     events.Add(CreateEvent(cfg.agent_id, snapshot, type, connection));
-                if (heartbeatDue) events.Add(CreateEvent(cfg.agent_id, snapshot, "HEARTBEAT", null));
+                if (heartbeatDue) events.AddRange(CreateSnapshot(cfg.agent_id, snapshot, current.Values));
                 QueueBatch(cfg.spool_dir, events);
                 previous = current;
                 if (heartbeatDue) lastHeartbeat = DateTimeOffset.UtcNow;
@@ -279,6 +279,15 @@ internal static class Program
             ["MONITORED_HOST"] = agentId,
             ["SNAPSHOT_ID"] = snapshot
         };
+    }
+
+    private static List<Dictionary<string,string>> CreateSnapshot(string agentId, string snapshot, IEnumerable<Connection> sockets)
+    {
+        var rows=sockets.Select(c=>CreateEvent(agentId,snapshot,c.Protocol=="UDP"?"UDP_SNAPSHOT":"TCP_SNAPSHOT",c)).ToList();
+        var complete=CreateEvent(agentId,snapshot,"HEARTBEAT",null);
+        complete["STATE"]="SNAPSHOT_COMPLETE:"+rows.Count.ToString(CultureInfo.InvariantCulture);
+        rows.Add(complete); // A complete zero-socket snapshot also resets old state.
+        return rows;
     }
 
     private static void QueueBatch(string dir, List<Dictionary<string, string>> events)

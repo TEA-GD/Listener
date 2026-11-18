@@ -184,7 +184,15 @@ function Invoke-ServerAgent([string]$Path, [bool]$RunOnce) {
                     }
                 }
                 $heartbeatDue = ([DateTimeOffset]::UtcNow - $lastHeartbeat).TotalSeconds -ge $config.heartbeat_seconds
-                if ($heartbeatDue) { $batch.Add((New-AgentEvent $config $snapshot 'HEARTBEAT' $null)) }
+                if ($heartbeatDue) {
+                    foreach ($socket in $current.Values) {
+                        $kind='TCP_SNAPSHOT'; if ($socket.Protocol -eq 'UDP') { $kind='UDP_SNAPSHOT' }
+                        $batch.Add((New-AgentEvent $config $snapshot $kind $socket))
+                    }
+                    $complete=New-AgentEvent $config $snapshot 'HEARTBEAT' $null
+                    $complete.STATE='SNAPSHOT_COMPLETE:'+$current.Count
+                    $batch.Add($complete)
+                }
                 Add-SpoolBatch $config $batch.ToArray()
                 $previous = $current
                 if ($heartbeatDue) { $lastHeartbeat = [DateTimeOffset]::UtcNow }

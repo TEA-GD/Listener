@@ -92,7 +92,7 @@ internal sealed class InstallerForm : Form
         _log.ReadOnly = true;
         _log.ScrollBars = ScrollBars.Vertical;
         _log.Font = new Font("Consolas", 9F);
-        _log.Text = "Ready. No keys or tokens. Collector must run the matching PLAIN TCP version and accept this connection.";
+        _log.Text = "Ready. Upgrade the Collector first: this agent sends TCP_SNAPSHOT / UDP_SNAPSHOT records. Starting the task does not verify event delivery.";
         Controls.Add(_log);
 
         _deleteData.Text = "Also delete local configuration and buffered unsent events (irreversible)";

@@ -314,3 +314,9 @@ bindings and process ownership; Linux also includes configured peers when expose
 by `ss`. See [UDP behavior and upgrade order](Agent/UDP.md). Update the collector
 first, then agents, GUI and analyzer. Metadata delivery remains TCP/ACK on port
 6515; no UDP collector port is added. Existing database columns are reused.
+
+## Device overview and latest reported sockets
+
+The database GUI now includes an hourly connections-per-minute chart, observed device IP addresses, and a paged table of latest reported connections/peers when a device is selected. It refreshes every ten seconds and labels stale, incomplete and missing snapshots. [Details and upgrade instructions](Listener_DB_GUI/README.md#device-overview-rate-addresses-and-current-reported-connections).
+
+Upgrade in this order: **Collector → agents (compiled Agent or ServerAgent) → dashboard**. Rebuild the components with `Build-Windows-All.bat` before replacing installed binaries. The updated agents send new snapshot event types; old Collectors cannot accept those types. Older agents still send their original events to the new Collector, but their current-connections view requires an agent update. Snapshot reporting increases event/CSV storage; no existing database records are deleted.

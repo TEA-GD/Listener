@@ -18,11 +18,13 @@ class ServerAgent(unittest.TestCase):
             result=run('Checks');self.assertEqual(0,result.returncode,result.stdout+result.stderr)
             for f in (root/'spool').glob('*.json'):f.unlink()
             result=run('Collect');self.assertEqual(1,result.returncode,result.stdout+result.stderr)
-            files=list((root/'spool').glob('*.json'));self.assertEqual(2,len(files),result.stdout+result.stderr)
+            files=list((root/'spool').glob('*.json'));self.assertEqual(3,len(files),result.stdout+result.stderr)
             events=[json.loads(f.read_text()) for f in files]
-            self.assertEqual({'ACTIVE_AT_START','HEARTBEAT'},{r['EVENT_TYPE'] for r in events})
+            self.assertEqual({'ACTIVE_AT_START','TCP_SNAPSHOT','HEARTBEAT'},{r['EVENT_TYPE'] for r in events})
             active=next(r for r in events if r['EVENT_TYPE']=='ACTIVE_AT_START')
             self.assertEqual('server-process.exe',active['PROCESS_NAME'])
+            self.assertEqual('SNAPSHOT_COMPLETE:1',next(r for r in events if r['EVENT_TYPE']=='HEARTBEAT')['STATE'])
+            self.assertEqual(1,len({r['SNAPSHOT_ID'] for r in events}))
             collector={'bind_host':'127.0.0.1','bind_port':port,'database_path':str(root/'events.db'),'csv_dir':str(root/'csv'),'log_file':str(root/'collector.log'),'csv_export_seconds':1,'allowed_client_cidrs':[]}
             cfg=root/'collector.json';cfg.write_text(json.dumps(collector))
             with (root/'collector-output.log').open('w+') as log:
@@ -35,7 +37,7 @@ class ServerAgent(unittest.TestCase):
                     result=run('Send');self.assertEqual(0,result.returncode,result.stdout+result.stderr)
                     self.assertEqual([],list((root/'spool').glob('*.json')))
                     with sqlite3.connect(root/'events.db') as db:
-                        self.assertEqual(2,db.execute('SELECT count(*) FROM events').fetchone()[0])
+                        self.assertEqual(3,db.execute('SELECT count(*) FROM events').fetchone()[0])
                         self.assertEqual(active['TIMESTAMP_UTC'],db.execute("SELECT TIMESTAMP_UTC FROM events WHERE EVENT_TYPE='ACTIVE_AT_START'").fetchone()[0])
                         self.assertEqual(('DC-01.example.local','192.0.2.10','203.0.113.20','443','127.0.0.1'),db.execute("SELECT MONITORED_HOST,SOURCE_IP,RECIEVER_IP,PORT_USED,COLLECTOR_PEER_IP FROM events WHERE EVENT_TYPE='ACTIVE_AT_START'").fetchone())
                     csv=root/'csv/DC-01.example.local'/f"{events[0]['TIMESTAMP_UTC'][:10]}.csv"
@@ -46,7 +48,7 @@ class ServerAgent(unittest.TestCase):
                     # Replaying a previously acknowledged event is deduplicated by the real collector.
                     (root/'spool/replay.json').write_text(json.dumps(active))
                     result=run('Send');self.assertEqual(0,result.returncode,result.stdout+result.stderr)
-                    with sqlite3.connect(root/'events.db') as db:self.assertEqual(2,db.execute('SELECT count(*) FROM events').fetchone()[0])
+                    with sqlite3.connect(root/'events.db') as db:self.assertEqual(3,db.execute('SELECT count(*) FROM events').fetchone()[0])
                     config['poll_seconds']=1;path.write_text(json.dumps(config))
                     loop=subprocess.Popen([pwsh,'-NoLogo','-NoProfile','-File',str(ROOT/'tests/Test-ServerAgent.ps1'),'-AgentScript',str(ROOT/'ServerAgent/Watcher-ServerAgent.ps1'),'-ConfigPath',str(path),'-Mode','Continuous'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
                     try:

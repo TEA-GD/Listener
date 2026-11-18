@@ -296,7 +296,7 @@ internal static class Database
     private static readonly Regex SafeHost = new(@"^[A-Za-z0-9_.-]{1,120}$", RegexOptions.Compiled);
     private static readonly HashSet<string> EventTypes = new(StringComparer.Ordinal) {
         "ACTIVE_AT_START", "TCP_CONNECTED", "TCP_DISCONNECTED", "HEARTBEAT",
-        "UDP_ENDPOINT_AT_START", "UDP_ENDPOINT_OPENED", "UDP_ENDPOINT_CLOSED"
+        "UDP_ENDPOINT_AT_START", "UDP_ENDPOINT_OPENED", "UDP_ENDPOINT_CLOSED", "TCP_SNAPSHOT", "UDP_SNAPSHOT"
     };
     private static SqliteConnection Connect(string path)
     {
@@ -349,6 +349,8 @@ internal static class Database
         }
         c.CommandText = """
             CREATE INDEX IF NOT EXISTS idx_events_host_date ON events(host,date_utc,timestamp_utc);
+            CREATE INDEX IF NOT EXISTS idx_events_live ON events(host,EVENT_TYPE,TIMESTAMP_UTC);
+            CREATE INDEX IF NOT EXISTS idx_events_snapshot ON events(host,SNAPSHOT_ID);
             CREATE TABLE IF NOT EXISTS dirty (
                 host TEXT NOT NULL,
                 date_utc TEXT NOT NULL,

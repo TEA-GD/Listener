@@ -177,7 +177,7 @@ class Dashboard(unittest.TestCase):
             page.locator('#protocol').select_option('UDP');page.get_by_role('button',name='Apply filters').click()
             expect(page.locator('#resultCount')).to_have_text('4 matching events');expect(page.locator('#events')).to_contain_text('5353')
             expect(page.locator('#events')).to_contain_text('PEER_CONFIGURED')
-            expect(page.get_by_role('columnheader',name='Local port',exact=True)).to_be_visible()
+            expect(page.locator('#events').locator('xpath=..').get_by_role('columnheader',name='Local port',exact=True)).to_be_visible()
             page.locator('#connectionProtocol').select_option('UDP');page.get_by_role('button',name='Check connections').click()
             expect(page.locator('#connectionSummary')).to_have_text('1 new · 0 returned')
             page.get_by_role('button',name='Show events for 203.0.113.99',exact=True).click()

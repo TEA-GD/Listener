@@ -39,6 +39,14 @@ internal static class AgentIntegration
             Check(rejected, "Invalid port accepted");
         }
         TestUdp();
+        var createSnapshot=typeof(WatcherAgent.Program).GetMethod("CreateSnapshot",BindingFlags.NonPublic|BindingFlags.Static)!;
+        var sockets=new[]{new Connection("10.0.0.1",5000,"198.51.100.1",443,12,"app","app"),new Connection("0.0.0.0",5353,"",0,13,"udp","udp","UDP","BOUND")};
+        var full=(List<Dictionary<string,string>>)createSnapshot.Invoke(null,new object[]{"agent","test-snapshot",sockets})!;
+        Check(full.Count==3&&full[^1]["STATE"]=="SNAPSHOT_COMPLETE:2","Snapshot completion/count missing");
+        Check(full.Select(r=>r["EVENT_TYPE"]).SequenceEqual(new[]{"TCP_SNAPSHOT","UDP_SNAPSHOT","HEARTBEAT"}),"Snapshot protocols mixed");
+        Check(full.All(r=>r["SNAPSHOT_ID"]=="test-snapshot"),"Snapshot IDs differ");
+        var empty=(List<Dictionary<string,string>>)createSnapshot.Invoke(null,new object[]{"agent","empty",Array.Empty<Connection>()})!;
+        Check(empty.Count==1&&empty[0]["STATE"]=="SNAPSHOT_COMPLETE:0","Empty state must reset prior sockets");
         foreach (bool acknowledge in new[] { true, false }) await TestDelivery(acknowledge);
         Console.WriteLine("PASS: hostname configuration, legacy defaults, validation, DNS TCP delivery, ACK deletion and failed-ACK retention");
     }
