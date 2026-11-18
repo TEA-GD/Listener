@@ -7,7 +7,7 @@ receiver in [Listener_MailReceiver](../Listener_MailReceiver/README.md). It repo
 **newly received mail from outside configured domains** to Listener. Collection
 is disabled until a user configures and enables the selected mail accounts.
 
-The packaged add-on is [packages/listener-external-mail-1.0.0.xpi](packages/listener-external-mail-1.0.0.xpi).
+The packaged add-on is [packages/listener-external-mail-1.0.1.xpi](packages/listener-external-mail-1.0.1.xpi).
 It contains the source files in `extension/`, not credentials, mail or local
 settings. It is an unsigned internal/development package, not an add-on published
 to addons.thunderbird.net. Follow your organization's extension policy.
@@ -38,7 +38,7 @@ such as `example.com.evil.test` never matches `example.com`.
 
 Follow [receiver setup](../Listener_MailReceiver/README.md) to:
 
-1. Start the collector once so its database exists.
+1. Start the updated Collector or mail receiver to initialize the shared database and both mail tables.
 2. Build/start the Mail Receiver, configure your actual internal domains and
    receiver key, and expose it via trusted HTTPS for domain-network access.
 3. Rebuild/restart Listener_DB_GUI with a separate mail-viewing key.
@@ -54,7 +54,7 @@ In Thunderbird:
 
 1. Open **Add-ons and Themes**.
 2. Open the gear menu and choose **Install Add-on From File**.
-3. Select `listener-external-mail-1.0.0.xpi` and approve the displayed permissions.
+3. Select `listener-external-mail-1.0.1.xpi` and approve the displayed permissions.
 4. Open the add-on's preferences/options, or click its toolbar button.
 
 No user passwords are needed. The add-on requests `accountsRead`, `messagesRead`,
@@ -155,3 +155,5 @@ Thunderbird version and organizational deployment policy before rolling it out.
 
 API behavior was checked against Mozilla's Thunderbird schemas:
 `mail/components/extensions/schemas/messages.json` in `mozilla/releases-comm-central`.
+
+Version 1.0.1 packages are rebuilt from the current source. The add-on IDs and local queues are unchanged within each variant, so updating a variant preserves its settings and pending alerts. Full-text and metadata-only variants retain distinct IDs and queues.

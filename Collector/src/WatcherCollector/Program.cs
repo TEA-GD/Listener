@@ -357,6 +357,7 @@ internal static class Database
             );
             """;
         c.ExecuteNonQuery();
+        MailDatabaseSchema.Initialize(db, transaction);
         transaction.Commit();
     }
     public static string Store(string path, JsonElement envelope, string peerIp)

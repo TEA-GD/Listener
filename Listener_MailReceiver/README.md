@@ -3,36 +3,22 @@
 For date, sender, receiver and attachment names **without subjects or message text**, use the separate [metadata-only variant](../Listener_MailReceiver_Metadata/README.md).
 
 Separate .NET 10 HTTP service for the [Thunderbird add-on](../Thunderbird_Addon/README.md).
-It stores external-mail alerts in a new `email_alerts` table in the existing
-collector database. It does not alter TCP event rows or send them to the analyzer.
+It stores external-mail alerts in `email_alerts` in the shared Collector database. It does not alter TCP event rows or send them to the analyzer.
 The updated dashboard has a separate, key-protected Mail alerts view.
 
 ## Windows setup
 
-Run setup on the collector PC. First start the collector or run its configuration
-check so `watcher-events.db` and the `events` table exist.
+Run setup on the collector PC. The updated Collector and either mail receiver create both mail tables automatically. A receiver can create the database before the Collector starts; connection tables are added when the Collector starts. Existing mail and connection data are preserved.
 
 1. Build `Listener_MailReceiver/Build-Windows.bat` with .NET 10 SDK/NuGet access.
    Output is self-contained in `output/windows/`.
-2. Open PowerShell as Administrator and create a protected receiver-key file:
+2. On first startup, use the new `-InitializeKey` option to create the protected receiver key. Existing keys are preserved:
 
 ```powershell
-$dir = "$env:ProgramData\WatcherMailReceiver"
-New-Item -ItemType Directory -Path $dir -Force | Out-Null
-icacls.exe $dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F'
-$path = Join-Path $dir 'receiver.key'
-if (Test-Path $path) { throw 'Key already exists. Preserve it or rotate it deliberately.' }
-$bytes = New-Object byte[] 32
-$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
-$rng.GetBytes($bytes)
-$rng.Dispose()
-[IO.File]::WriteAllText($path, [Convert]::ToBase64String($bytes))
-Set-Clipboard -Value ([IO.File]::ReadAllText($path))
+.\Start-Windows.ps1 -InitializeKey -InternalDomains 'example.com'
 ```
 
-The key is copied to your local clipboard for pasting into the add-on's receiver
-key field. Do not put it in Git, chat, URLs or startup arguments. Protect the
-folder/key file and avoid copying private keys or mail into support logs.
+The helper grants file access to the launching account, SYSTEM and Administrators. Run PowerShell as Administrator when using ProgramData. If a service/task uses a different account, grant that account read access to the key. Copy the key locally into the add-on's Receiver key setting; do not put it in Git, chat, URLs or startup arguments. `-TokenFile` selects an existing key file. Keep the whole repository layout when building/running from source: shared schema and key setup live in `Shared/`.
 
 3. From `Listener_MailReceiver`, start the service with your actual domain list:
 
@@ -64,7 +50,11 @@ certificate verification to make a client connect.
 Mail endpoints are disabled unless the GUI has a mail-viewing key. This avoids
 exposing full email content to everyone who can already reach the TCP dashboard.
 Create a **separate random key** in a protected file, using the same generation
-steps above with filename `mail-view.key`. Keep the receiver key unchanged.
+helper in `Shared/Initialize-ReceiverKey.ps1` with filename `mail-view.key`. Keep the receiver key unchanged.
+
+```powershell
+..\Shared\Initialize-ReceiverKey.ps1 -TokenFile "$env:ProgramData\WatcherMailReceiver\mail-view.key"
+```
 Rebuild the GUI, then from `Listener_DB_GUI` start it with:
 
 ```powershell
@@ -150,3 +140,5 @@ Tests use synthetic messages/keys with real HTTP/SQLite and mock Thunderbird
 APIs in Chromium. Real Thunderbird installation, IMAP/POP new-mail reception,
 encrypted-message behavior, domain HTTPS configuration and startup tasks remain
 deployment checks. No real email or live recipients are used by development tests.
+
+The dashboard **Mail variant** selector switches between full-text and metadata-only alerts. Both modes require the mail viewing key. Both receivers and the Collector now initialize the same two mail tables using `Shared/MailDatabaseSchema.cs`; initialization is additive and repeatable.

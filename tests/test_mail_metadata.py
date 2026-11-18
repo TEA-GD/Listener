@@ -86,7 +86,7 @@ class MetadataTests(unittest.TestCase):
         self.assertEqual('stored', self.post(empty)['status'])
         self.assertEqual(2, len(self.rows()))
         with sqlite3.connect(self.db) as db:
-            self.assertEqual([], db.execute("SELECT name FROM sqlite_master WHERE name='email_alerts'").fetchall())
+            self.assertEqual(0, db.execute('SELECT COUNT(*) FROM email_alerts').fetchone()[0])
     def test_extension_metadata_queue_restart_and_no_body_apis(self):
         from playwright.sync_api import sync_playwright
         handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(ROOT / 'Thunderbird_Addon_Metadata/extension'))
@@ -151,7 +151,8 @@ class MetadataTests(unittest.TestCase):
 class PackageTests(unittest.TestCase):
     def test_packaged_source_matches_and_contains_no_body_extraction(self):
         extension = ROOT / 'Thunderbird_Addon_Metadata/extension'
-        with zipfile.ZipFile(ROOT / 'Thunderbird_Addon_Metadata/packages/listener-mail-metadata-1.0.0.xpi') as archive:
+        version = json.loads((extension / 'manifest.json').read_text())['version']
+        with zipfile.ZipFile(ROOT / f'Thunderbird_Addon_Metadata/packages/listener-mail-metadata-{version}.xpi') as archive:
             for path in extension.iterdir(): self.assertEqual(path.read_bytes(), archive.read(path.name))
         script = (extension / 'background.js').read_text()
         for api in ['getFull(', 'getRaw(', 'getAttachmentFile(', 'body_text:', 'text_parts:', 'subject:']:

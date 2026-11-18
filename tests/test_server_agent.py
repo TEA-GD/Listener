@@ -9,7 +9,7 @@ class ServerAgent(unittest.TestCase):
         self.assertTrue(pwsh and dotnet,'Set PWSH_PATH and put .NET on PATH')
         with tempfile.TemporaryDirectory(prefix='watcher-server-test-') as directory:
             root=pathlib.Path(directory)
-            env=dict(os.environ,XDG_CACHE_HOME=str(root/'cache'),XDG_CONFIG_HOME=str(root/'config'))
+            env=dict(os.environ,XDG_CACHE_HOME=str(root/'cache'),XDG_CONFIG_HOME=str(root/'config'),TZ='Europe/Moscow')
             with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
             config={'agent_id':'DC-01.example.local','collector_host':'localhost','collector_port':port,'spool_dir':str(root/'spool'),'log_file':str(root/'agent.log'),'poll_seconds':5,'heartbeat_seconds':60,'max_spool_events':50000,'send_batch_size':1000}
             path=root/'agent.json';path.write_text(json.dumps(config))
@@ -36,6 +36,7 @@ class ServerAgent(unittest.TestCase):
                     self.assertEqual([],list((root/'spool').glob('*.json')))
                     with sqlite3.connect(root/'events.db') as db:
                         self.assertEqual(2,db.execute('SELECT count(*) FROM events').fetchone()[0])
+                        self.assertEqual(active['TIMESTAMP_UTC'],db.execute("SELECT TIMESTAMP_UTC FROM events WHERE EVENT_TYPE='ACTIVE_AT_START'").fetchone()[0])
                         self.assertEqual(('DC-01.example.local','192.0.2.10','203.0.113.20','443','127.0.0.1'),db.execute("SELECT MONITORED_HOST,SOURCE_IP,RECIEVER_IP,PORT_USED,COLLECTOR_PEER_IP FROM events WHERE EVENT_TYPE='ACTIVE_AT_START'").fetchone())
                     csv=root/'csv/DC-01.example.local'/f"{events[0]['TIMESTAMP_UTC'][:10]}.csv"
                     for _ in range(100):
@@ -88,7 +89,7 @@ class ServerAgent(unittest.TestCase):
     def test_udp_bindings_and_transitions(self):
         pwsh=os.environ.get('PWSH_PATH') or shutil.which('pwsh');dotnet=os.environ.get('DOTNET_HOST_PATH') or shutil.which('dotnet')
         with tempfile.TemporaryDirectory(prefix='watcher-udp-server-') as directory:
-            root=pathlib.Path(directory);env=dict(os.environ,XDG_CACHE_HOME=str(root/'cache'),XDG_CONFIG_HOME=str(root/'config'))
+            root=pathlib.Path(directory);env=dict(os.environ,XDG_CACHE_HOME=str(root/'cache'),XDG_CONFIG_HOME=str(root/'config'),TZ='Europe/Moscow')
             with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
             config={'agent_id':'UDP-server','collector_host':'localhost','collector_port':port,'spool_dir':str(root/'spool'),'log_file':str(root/'agent.log'),'poll_seconds':1,'heartbeat_seconds':60,'max_spool_events':50000,'send_batch_size':1000}
             path=root/'agent.json';path.write_text(json.dumps(config))

@@ -16,8 +16,8 @@ Client/account labels and IDs, a message deduplication hash, alert IDs and a rec
 
 ## Install
 
-1. Build/start [Listener_MailReceiver_Metadata](../Listener_MailReceiver_Metadata/README.md). It uses **port 6517**, endpoint `/api/mail-metadata`, and a separate database/table.
-2. Download [listener-mail-metadata-1.0.0.xpi](packages/listener-mail-metadata-1.0.0.xpi) using the file's **Download raw file** button. Or run `python build.py` in this folder to rebuild the XPI.
+1. Build/start [Listener_MailReceiver_Metadata](../Listener_MailReceiver_Metadata/README.md). It uses **port 6517**, endpoint `/api/mail-metadata`, and a separate metadata table in the shared Collector database by default.
+2. Download [listener-mail-metadata-1.0.1.xpi](packages/listener-mail-metadata-1.0.1.xpi) using the file's **Download raw file** button. Or run `python build.py` in this folder to rebuild the XPI.
 3. In Thunderbird, open **Add-ons and Themes → gear → Install Add-on From File** and select the XPI. This is an unsigned internal/development package; Thunderbird's signing and enterprise installation requirements still apply.
 4. Open the add-on's options. Select accounts, set internal domains, a client label, receiver URL and the receiver's secret key (at least 32 characters). Enable collection, save and grant receiver access.
 5. Send a synthetic test from options, then receive a new external test message.
@@ -34,4 +34,6 @@ For AD/GPO deployment use the new add-on ID in Thunderbird's `ExtensionSettings`
 
 ## Viewing results
 
-Use the SQL query in the metadata receiver README to view/export the five requested fields. The existing Listener dashboard reads the original `email_alerts` table and does **not** display this variant's new metadata table.
+In the updated Listener dashboard open **Mail alerts**, provide the viewing key, and choose **Metadata only** in **Mail variant**. The SQL query in the metadata receiver README can also export the five requested fields.
+
+Version 1.0.1 packages are rebuilt from the current source. The add-on IDs and local queues are unchanged within each variant, so updating a variant preserves its settings and pending alerts. Full-text and metadata-only variants retain distinct IDs and queues.

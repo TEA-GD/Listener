@@ -11,7 +11,7 @@ var builder=WebApplication.CreateBuilder(args);
 if(string.IsNullOrEmpty(builder.Configuration["urls"]))builder.WebHost.UseUrls("http://127.0.0.1:6517");
 string token=Environment.GetEnvironmentVariable("LISTENER_MAIL_TOKEN")??(Environment.GetEnvironmentVariable("LISTENER_MAIL_TOKEN_FILE") is string tokenPath?File.ReadAllText(tokenPath).Trim():"");
 if(token.Length<32)throw new InvalidOperationException("Set LISTENER_MAIL_TOKEN to a random secret of at least 32 characters. Do not put it in source control.");
-string database=builder.Configuration["DatabasePath"]??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),"WatcherMailMetadata","mail-metadata.db");
+string database=builder.Configuration["DatabasePath"]??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),"WatcherCollector","watcher-events.db");
 var domains=(builder.Configuration["InternalDomains"]??"").Split(',',StringSplitOptions.TrimEntries|StringSplitOptions.RemoveEmptyEntries).Select(MailStore.NormalizeDomain).Distinct().ToArray();
 if(domains.Length==0)throw new InvalidOperationException("Set InternalDomains to your comma-separated internal email domains.");
 bool subdomains=bool.TryParse(builder.Configuration["IncludeSubdomains"],out bool include)?include:true;
@@ -88,17 +88,11 @@ sealed class MailStore(string path)
         catch{db.Dispose();throw;}
     }
     public void Initialize(){
-        using var db=Open();using var c=db.CreateCommand();
-        c.CommandText="""
-            PRAGMA journal_mode=WAL;
-            CREATE TABLE IF NOT EXISTS email_metadata_alerts(
-                alert_id TEXT PRIMARY KEY,client_id TEXT NOT NULL,client_label TEXT NOT NULL,account_id TEXT NOT NULL,
-                message_key TEXT NOT NULL,sender TEXT NOT NULL,recipients_json TEXT NOT NULL,
-                has_attachments INTEGER NOT NULL CHECK(has_attachments IN (0,1)),attachment_names_json TEXT NOT NULL,
-                message_date_utc TEXT NOT NULL,received_utc TEXT NOT NULL,UNIQUE(client_id,account_id,message_key)
-            );
-            CREATE INDEX IF NOT EXISTS idx_email_metadata_received ON email_metadata_alerts(received_utc);
-            """;c.ExecuteNonQuery();
+        using var db=Open();
+        using(var wal=db.CreateCommand()){wal.CommandText="PRAGMA journal_mode=WAL;";wal.ExecuteNonQuery();}
+        using var transaction=db.BeginTransaction();
+        MailDatabaseSchema.Initialize(db,transaction);
+        transaction.Commit();
     }
     public (string AlertId,bool Duplicate) Save(MailAlert mail,string senderAddress,string senderDomain){
         using var db=Open();using var tx=db.BeginTransaction();using var c=db.CreateCommand();c.Transaction=tx;

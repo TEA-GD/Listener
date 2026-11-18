@@ -74,6 +74,50 @@ class MailTests(unittest.TestCase):
         self.assertEqual('stored',self.post(malformed)['status'])
         self.assertEqual('',self.get('/api/mail/'+malformed['alert_id'])['sender_domain'])
         with sqlite3.connect(self.db) as db:self.assertEqual(1,db.execute('SELECT COUNT(*) FROM events').fetchone()[0])
+    def test_shared_schema_metadata_dashboard_and_receiver_restart(self):
+        from playwright.sync_api import sync_playwright,expect
+        full=self.sample();self.post(full)
+        metadata_url=self.start('Listener_MailReceiver_Metadata',['--DatabasePath',str(self.db),'--InternalDomains','example.com'],{'LISTENER_MAIL_TOKEN':self.token},'/health')
+        metadata={'alert_id':str(uuid.uuid4()),'client_id':str(uuid.uuid4()),'client_label':'PC-metadata','account_id':'work','message_key':uuid.uuid4().hex,'sender':'Outside <sender@outside.test>','recipients':['to@example.com','cc@example.com'],'has_attachments':True,'attachment_names':['report-Привет.txt','<img src=x onerror=alert(1)>.txt'],'message_date_utc':'2026-11-18T10:00:00Z'}
+        request=urllib.request.Request(metadata_url+'/api/mail-metadata',data=json.dumps(metadata).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+self.token})
+        with urllib.request.urlopen(request) as response:self.assertEqual('stored',json.load(response)['status'])
+        self.assertEqual(1,self.get('/api/mail?mode=full')['total'])
+        self.assertEqual(1,self.get('/api/mail?mode=metadata')['total'])
+        self.assertEqual(1,self.get('/api/mail?mode=metadata&q=report')['total'])
+        details=self.get('/api/mail/'+metadata['alert_id']+'?mode=metadata')
+        self.assertEqual(1,details['has_attachments']);self.assertNotIn('body_text',details);self.assertNotIn('subject',details)
+        with self.assertRaises(urllib.error.HTTPError) as e:self.get('/api/mail/'+full['alert_id']+'?mode=metadata')
+        self.assertEqual(404,e.exception.code)
+        with self.assertRaises(urllib.error.HTTPError) as e:self.get('/api/mail?mode=invalid')
+        self.assertEqual(400,e.exception.code)
+        with self.assertRaises(urllib.error.HTTPError) as e:urllib.request.urlopen(self.gui+'/api/mail?mode=metadata')
+        self.assertEqual(401,e.exception.code)
+        # Reinitializing either receiver must preserve rows in both mail tables and TCP events.
+        self.start('Listener_MailReceiver',['--DatabasePath',str(self.db),'--InternalDomains','example.com'],{'LISTENER_MAIL_TOKEN':self.token},'/health')
+        self.assertEqual(1,self.get('/api/mail?mode=metadata')['total']);self.assertEqual(1,self.get('/api/mail')['total'])
+        with sync_playwright() as p:
+            browser=p.chromium.launch(headless=True,executable_path=shutil.which('chromium'),args=['--no-sandbox'])
+            page=browser.new_page();page.goto(self.gui+'/mail.html');page.locator('#mailKey').fill(self.view_token)
+            page.get_by_role('button',name='Load / search mail').click()
+            page.get_by_role('button',name='Read message '+full['subject'],exact=True).click()
+            expect(page.locator('#mailBody')).to_have_text(full['body_text'])
+            page.locator('#mailMode').select_option('metadata')
+            page.get_by_role('button',name='View metadata '+metadata['sender'],exact=True).click()
+            expect(page.locator('#mailFields')).to_contain_text('report-Привет.txt')
+            expect(page.locator('#mailFields')).to_contain_text('Has attachments')
+            expect(page.locator('#mailTextSection')).to_be_hidden()
+            self.assertEqual('',page.locator('#mailBody').text_content())
+            self.assertEqual(0,page.locator('img').count())
+            browser.close()
+        # A mail receiver can create its DB before the Collector exists, and the viewer can read mail there.
+        fresh=self.root/'mail-first.db'
+        self.start('Listener_MailReceiver',['--DatabasePath',str(fresh),'--InternalDomains','example.com'],{'LISTENER_MAIL_TOKEN':self.token},'/health')
+        viewer=self.start('Listener_DB_GUI',[],{'WATCHER_DB_PATH':str(fresh),'LISTENER_MAIL_VIEW_TOKEN':self.view_token},'/')
+        with urllib.request.urlopen(urllib.request.Request(viewer+'/api/mail?mode=metadata',headers={'Authorization':'Bearer '+self.view_token})) as response:
+            self.assertTrue(json.load(response)['available'])
+        with sqlite3.connect(fresh) as db:
+            self.assertEqual(2,db.execute("SELECT COUNT(*) FROM sqlite_master WHERE name IN ('email_alerts','email_metadata_alerts')").fetchone()[0])
+
     def test_invalid_and_oversized_requests_and_cors(self):
         mail=self.sample();mail['recipients']=None
         with self.assertRaises(urllib.error.HTTPError) as e:self.post(mail)

@@ -149,3 +149,9 @@ statistics support UDP endpoint observations. Known configured peers can appear
 on the New & rare connections board; peerless bindings cannot. UDP endpoint
 counts are event counts, not live sockets or packet counts. See
 [UDP behavior and upgrade order](../Agent/UDP.md).
+
+## Full-text and metadata-only mail
+
+Open `/mail.html`, enter the separate mail viewing key, and select **Full-text mail** or **Metadata only** in **Mail variant**. Metadata mode shows date, sender, receivers, attachment presence and filenames, without a message-text section. Both modes support search, paging and details. Receiver endpoints remain separate: ports 6516 (full text) and 6517 (metadata only).
+
+The Collector and both receivers initialize `email_alerts` and `email_metadata_alerts` in the same database by default. The dashboard remains read-only and does not initialize tables. Mail viewing also works before the Collector has created the connection tables; connection pages require starting the Collector. See [mail receiver setup](../Listener_MailReceiver/README.md#mail-dashboard-key) for a protected viewing key and `-MailViewKeyFile`.

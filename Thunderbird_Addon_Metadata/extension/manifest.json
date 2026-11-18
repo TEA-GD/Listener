@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Listener Mail Metadata Only",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Report only date, sender, recipients and attachment names; no subjects or message bodies.",
   "browser_specific_settings": {
     "gecko": {

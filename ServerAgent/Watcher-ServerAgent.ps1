@@ -138,9 +138,14 @@ function Send-Spool($Config) {
         $stream = $client.GetStream(); $stream.ReadTimeout=10000; $stream.WriteTimeout=10000
         $sent = 0
         foreach ($file in $files) {
-            $body = [IO.File]::ReadAllText($file.FullName) | ConvertFrom-Json
+            $raw = [IO.File]::ReadAllText($file.FullName)
+            $body = $raw | ConvertFrom-Json
             $id = [string]$body.EVENT_ID
-            $request = ConvertTo-Json -InputObject @{event=$body} -Depth 5 -Compress
+            # ConvertFrom-Json may turn UTC strings into local DateTime values in
+            # PowerShell 7. Preserve the original JSON instead of reserializing it.
+            # Remove formatting newlines so the envelope remains one protocol line;
+            # escaped \r/\n inside JSON strings remain unchanged.
+            $request = '{"event":' + $raw.Replace("`r",'').Replace("`n",'') + '}'
             $bytes = [Text.Encoding]::UTF8.GetBytes($request + "`n")
             if ($bytes.Length -gt 32768) { throw "Oversized event retained: $($file.Name)" }
             $stream.Write($bytes,0,$bytes.Length); $stream.Flush()

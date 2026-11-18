@@ -1,4 +1,5 @@
 param(
+    [switch]$InitializeKey,
     [Parameter(Mandatory=$true)][string]$InternalDomains,
     [string]$DatabasePath=(Join-Path $env:ProgramData 'WatcherCollector\watcher-events.db'),
     [string]$TokenFile=(Join-Path $env:ProgramData 'WatcherMailReceiver\receiver.key'),
@@ -6,7 +7,8 @@ param(
     [ValidateRange(1024,67108864)][int]$MaximumRequestBytes=16777216
 )
 $ErrorActionPreference='Stop'
-if (-not (Test-Path -LiteralPath $TokenFile -PathType Leaf)) { throw 'Create a protected receiver key file first; see README.md.' }
+if ($InitializeKey) { & (Join-Path $PSScriptRoot '..\Shared\Initialize-ReceiverKey.ps1') -TokenFile $TokenFile }
+if (-not (Test-Path -LiteralPath $TokenFile -PathType Leaf)) { throw "Receiver key not found: $TokenFile. Run this script with -InitializeKey -InternalDomains your-domain.example to create it, or pass -TokenFile pointing to your existing key." }
 $previousToken=$env:LISTENER_MAIL_TOKEN
 $previousFile=$env:LISTENER_MAIL_TOKEN_FILE
 try {

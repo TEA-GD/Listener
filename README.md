@@ -1,5 +1,20 @@
 # Watcher — TCP/UDP socket monitoring with a TCP collector
 
+## Integrated mail database and add-ons
+
+The updated Collector and both mail receivers automatically initialize **`email_alerts`** (full text) and **`email_metadata_alerts`** (date, sender, receiver, attachment flag and filenames). Initialization preserves existing data. All three default to `%ProgramData%\WatcherCollector\watcher-events.db`; set the same custom database path on all components if overriding it. The dashboard remains read-only.
+
+- [Full-text Thunderbird add-on](Thunderbird_Addon/README.md) → [receiver on port 6516](Listener_MailReceiver/README.md).
+- [Metadata-only Thunderbird add-on](Thunderbird_Addon_Metadata/README.md) → [receiver on port 6517](Listener_MailReceiver_Metadata/README.md).
+- [Dashboard](Listener_DB_GUI/README.md): open **Mail alerts**, enter the viewing key and choose the mail variant.
+
+Use receiver `Start-Windows.ps1 -InitializeKey -InternalDomains 'your-domain.example'` for first-time protected key setup. Existing keys are retained on updates. Keep the repository layout when building from source; shared code lives in `Shared/`.
+
+Run `Build-Windows-All.bat` with .NET 10 SDK and Python 3 to build Collector/Agent installers, Analyzer, dashboard, both receivers and both version 1.0.1 Thunderbird packages. Actual Windows installation and Thunderbird policy deployment must be verified on a test PC.
+
+**Upgrade:** back up existing databases before updating and stop database writers before a filesystem backup. Rebuild/restart Collector, receivers and dashboard to apply the shared schema. The previous metadata receiver defaulted to a standalone database; see its README to retain that path/history. Use only the metadata-only add-on if message text must not be collected.
+
+
 **No authentication tokens. No TLS certificates. No private/public keys. No Python needed for the installed C# programs.**
 
 This is a change to the **network protocol**, not just a fix to a certificate-loading flag. You MUST replace **both** the collector and every participating agent. An old TLS agent cannot talk to a plaintext collector, or vice versa.

@@ -90,25 +90,17 @@ sealed class MailStore(string path)
         return new IdnMapping().GetAscii(domain).ToLowerInvariant();
     }
     private SqliteConnection Open(){
-        if(!File.Exists(path))throw new IOException("Collector DB does not exist. Start the collector first, and set DatabasePath to its actual database.");
-        var db=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=path,Mode=SqliteOpenMode.ReadWrite,DefaultTimeout=15}.ToString());
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        var db=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=path,Mode=SqliteOpenMode.ReadWriteCreate,DefaultTimeout=15}.ToString());
         try{db.Open();using var pragma=db.CreateCommand();pragma.CommandText="PRAGMA busy_timeout=15000; PRAGMA synchronous=FULL;";pragma.ExecuteNonQuery();return db;}
         catch{db.Dispose();throw;}
     }
     public void Initialize(){
-        using var db=Open();using var c=db.CreateCommand();
-        c.CommandText="SELECT EVENT_ID FROM events LIMIT 0";using(var reader=c.ExecuteReader()){}
-        c.CommandText="""
-            PRAGMA journal_mode=WAL;
-            CREATE TABLE IF NOT EXISTS email_alerts(
-                alert_id TEXT PRIMARY KEY,client_id TEXT NOT NULL,client_label TEXT NOT NULL,account_id TEXT NOT NULL,
-                message_key TEXT NOT NULL,message_id TEXT NOT NULL,sender TEXT NOT NULL,sender_address TEXT NOT NULL,sender_domain TEXT NOT NULL,
-                recipients_json TEXT NOT NULL,cc_json TEXT NOT NULL,bcc_json TEXT NOT NULL,mailbox_addresses_json TEXT NOT NULL,delivered_to_json TEXT NOT NULL,
-                subject TEXT NOT NULL,body_text TEXT NOT NULL,text_parts_json TEXT NOT NULL,attachment_names_json TEXT NOT NULL,body_status TEXT NOT NULL,
-                message_date_utc TEXT,received_utc TEXT NOT NULL,UNIQUE(client_id,account_id,message_key)
-            );
-            CREATE INDEX IF NOT EXISTS idx_email_received ON email_alerts(received_utc);
-            """;c.ExecuteNonQuery();
+        using var db=Open();
+        using(var wal=db.CreateCommand()){wal.CommandText="PRAGMA journal_mode=WAL;";wal.ExecuteNonQuery();}
+        using var transaction=db.BeginTransaction();
+        MailDatabaseSchema.Initialize(db,transaction);
+        transaction.Commit();
     }
     public (string AlertId,bool Duplicate) Save(MailAlert mail,string senderAddress,string senderDomain){
         using var db=Open();using var tx=db.BeginTransaction();using var c=db.CreateCommand();c.Transaction=tx;
@@ -117,7 +109,7 @@ sealed class MailStore(string path)
         if(c.ExecuteScalar() is string existing){tx.Commit();return(existing,true);}
         c.Parameters.Clear();
         c.CommandText="""
-            INSERT INTO email_alerts VALUES($id,$client,$label,$account,$key,$message,$sender,$address,$domain,$to,$cc,$bcc,$mailboxes,$delivered,$subject,$body,$parts,$attachments,$status,$date,$now)
+            INSERT INTO email_alerts(alert_id,client_id,client_label,account_id,message_key,message_id,sender,sender_address,sender_domain,recipients_json,cc_json,bcc_json,mailbox_addresses_json,delivered_to_json,subject,body_text,text_parts_json,attachment_names_json,body_status,message_date_utc,received_utc) VALUES($id,$client,$label,$account,$key,$message,$sender,$address,$domain,$to,$cc,$bcc,$mailboxes,$delivered,$subject,$body,$parts,$attachments,$status,$date,$now)
             """;
         void Add(string name,object? value)=>c.Parameters.AddWithValue(name,value??DBNull.Value);
         Add("$id",mail.alert_id);Add("$client",mail.client_id);Add("$label",mail.client_label);Add("$account",mail.account_id);Add("$key",mail.message_key);Add("$message",mail.message_id);

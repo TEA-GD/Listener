@@ -147,3 +147,5 @@ left empty. New UDP_ENDPOINT_AT_START/OPENED/CLOSED events require the updated
 collector. See [UDP.md](../Agent/UDP.md) before upgrading. Existing explicit
 collect_udp choices survive registration updates. Set false and restart the
 task for TCP-only collection. Delivery remains TCP with matching ACKs.
+
+Queued events are transmitted with their original JSON values. PowerShell date parsing is used only while inspecting the event ID; delivery does not reserialize timestamps, so UTC is preserved even when the machine uses a non-UTC time zone.

@@ -147,26 +147,34 @@ app.MapGet("/api/connections", (HttpRequest request, ViewerDatabase database) =>
         """, parameters);
     return Results.Ok(new { host, day, gapDays, page, size, summary, destinations });
 });
+// The mode is allowlisted before it is used to select a table or projection.
+string MailTable(HttpRequest request)=>request.Query["mode"].ToString() switch {
+    "" or "full"=>"email_alerts", "metadata"=>"email_metadata_alerts",
+    _=>throw new ArgumentException("Mail mode must be full or metadata")
+};
 app.MapGet("/api/mail",(HttpRequest request,ViewerDatabase database)=>{
     var denied=MailAccess(request);if(denied is not null)return denied;
+    string table=MailTable(request);bool metadata=table=="email_metadata_alerts";
     int page=ParseNumber(request.Query["page"].ToString(),1,1,1000000);
     string search=request.Query["q"].ToString();if(search.Length>200)throw new ArgumentException("Mail search must be at most 200 characters.");
-    using var db=database.Open();
-    if(ViewerDatabase.Query(db,"SELECT name FROM sqlite_master WHERE type='table' AND name='email_alerts'").Count==0)
+    using var db=database.Open(false);
+    if(ViewerDatabase.Query(db,"SELECT name FROM sqlite_master WHERE type='table' AND name=$table",new(){["$table"]=table}).Count==0)
         return Results.Ok(new{available=false,total=0,page,size=50,alerts=Array.Empty<object>()});
-    string where=search.Length==0?"":" WHERE instr(lower(sender),lower($q))>0 OR instr(lower(subject),lower($q))>0 OR instr(lower(recipients_json),lower($q))>0 OR instr(lower(client_label),lower($q))>0";
+    string where=search.Length==0?"":" WHERE (instr(lower(sender),lower($q))>0 OR instr(lower(recipients_json),lower($q))>0 OR instr(lower(client_label),lower($q))>0 OR instr(lower(attachment_names_json),lower($q))>0"+(metadata?"": " OR instr(lower(subject),lower($q))>0")+")";
     var args=new Dictionary<string,object>();if(search.Length>0)args["$q"]=search;
-    var total=ViewerDatabase.Query(db,"SELECT COUNT(*) AS total FROM email_alerts"+where,args)[0]["total"];
+    var total=ViewerDatabase.Query(db,"SELECT COUNT(*) AS total FROM "+table+where,args)[0]["total"];
     args["$limit"]=50;args["$offset"]=(page-1)*50;
-    var alerts=ViewerDatabase.Query(db,"SELECT alert_id,client_label,sender,sender_domain,subject,recipients_json,attachment_names_json,body_status,message_date_utc,received_utc FROM email_alerts"+where+" ORDER BY received_utc DESC,alert_id LIMIT $limit OFFSET $offset",args);
+    string columns=metadata?"alert_id,client_label,sender,recipients_json,attachment_names_json,has_attachments,message_date_utc,received_utc":"alert_id,client_label,sender,sender_domain,subject,recipients_json,attachment_names_json,body_status,message_date_utc,received_utc";
+    var alerts=ViewerDatabase.Query(db,"SELECT "+columns+" FROM "+table+where+" ORDER BY received_utc DESC,alert_id LIMIT $limit OFFSET $offset",args);
     return Results.Ok(new{available=true,total,page,size=50,alerts});
 });
 app.MapGet("/api/mail/{id}",(string id,HttpRequest request,ViewerDatabase database)=>{
     var denied=MailAccess(request);if(denied is not null)return denied;
+    string table=MailTable(request);
     if(!Guid.TryParseExact(id,"D",out _))return Results.BadRequest(new{error="Invalid mail alert ID"});
-    using var db=database.Open();
-    if(ViewerDatabase.Query(db,"SELECT name FROM sqlite_master WHERE type='table' AND name='email_alerts'").Count==0)return Results.NotFound(new{error="Mail receiver has not initialized this database"});
-    var rows=ViewerDatabase.Query(db,"SELECT * FROM email_alerts WHERE alert_id=$id",new(){["$id"]=id});
+    using var db=database.Open(false);
+    if(ViewerDatabase.Query(db,"SELECT name FROM sqlite_master WHERE type='table' AND name=$table",new(){["$table"]=table}).Count==0)return Results.NotFound(new{error="Mail receiver has not initialized this database"});
+    var rows=ViewerDatabase.Query(db,"SELECT * FROM "+table+" WHERE alert_id=$id",new(){["$id"]=id});
     return rows.Count==0?Results.NotFound(new{error="Mail alert not found"}):Results.Ok(rows[0]);
 });
 IResult? MailAccess(HttpRequest request){
@@ -187,7 +195,7 @@ sealed class ViewerException(string message) : Exception(message);
 sealed class ViewerDatabase(string path)
 {
     public const string EventColumns = "EVENT_ID,EVENT_TYPE,TIMESTAMP_UTC,DATE_AND_TIME,SOURCE_IP,SOURCE_DOMAIN_NAME,PROCESS_NAME,PROCESS_ID,RECIEVER_IP,RECIEVER_DOMAINNAME,PORT_USED,SOFTWARE_THAT_USED,SOURCE_PORT,PROTOCOL,STATE,OPERATING_SYSTEM,MONITORED_HOST,SNAPSHOT_ID,COLLECTOR_PEER_IP,received_utc";
-    public SqliteConnection Open() {
+    public SqliteConnection Open(bool requireEvents = true) {
         if (!File.Exists(path)) throw new ViewerException("Database not found. Set WATCHER_DB_PATH to the collector's watcher-events.db file, then restart the dashboard.");
         var db = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadOnly, DefaultTimeout = 5 }.ToString());
         try {
@@ -195,9 +203,11 @@ sealed class ViewerDatabase(string path)
             using var cmd = db.CreateCommand();
             cmd.CommandText = "PRAGMA query_only=ON;";
             cmd.ExecuteNonQuery();
+            if (requireEvents) {
             cmd.CommandText = "SELECT " + EventColumns + ",date_utc FROM events LIMIT 0";
             try { using var reader = cmd.ExecuteReader(); }
             catch (SqliteException) { throw new ViewerException("Unsupported database schema. Start the updated collector once to migrate events into separate columns; then refresh this page."); }
+            }
             return db;
         }
         catch { db.Dispose(); throw; }
