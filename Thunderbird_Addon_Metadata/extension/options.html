@@ -1,0 +1,12 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Listener mail alerts</title><link rel="stylesheet" href="options.css"><script defer src="core.js"></script><script defer src="options.js"></script></head><body><main><h1>Listener mail metadata only</h1><p>When enabled, newly received mail from outside your domains is sent to Listener with its date, sender, recipients, attachment presence and attachment names. Subjects, message bodies and attachment contents are never queued or sent.</p><form id="settings">
+<label class="check"><input type="checkbox" id="enabled">Enable collection and forwarding for the selected accounts</label>
+<label>Internal domains<textarea id="domains" rows="3" placeholder="example.com, subsidiary.example"></textarea></label><label class="check"><input type="checkbox" id="subdomains" checked>Treat subdomains of these domains as internal</label>
+<fieldset><legend>Accounts to monitor</legend><div id="accounts"></div></fieldset>
+<label>Client label<input id="clientLabel" maxlength="120" placeholder="PC-01 / Alice Thunderbird"></label>
+<label>Listener Mail Metadata Receiver URL<input id="receiver" type="url" value="http://127.0.0.1:6517" required></label>
+<label>Receiver key<input id="token" type="password" autocomplete="off" spellcheck="false"></label>
+<label class="check"><input id="allowHttp" type="checkbox">Allow unencrypted HTTP to a remote receiver on a trusted network. Mail metadata and the receiver key will be visible in transit.</label>
+<p>HTTPS is recommended for domain-network access. The receiver is a separate Listener Mail Metadata Receiver service on port 6517, not the TCP collector port 6515 or dashboard port 5080.</p>
+<button type="submit">Save settings and grant receiver access</button></form>
+<section><h2>Delivery status</h2><pre id="status" role="status">Loading…</pre><button id="refresh" type="button">Refresh status</button> <button id="retry" type="button">Retry pending alerts</button> <button id="test" type="button">Send synthetic test</button><p>Collection starts with new incoming mail after enabling; there is no automatic scan of old mail. Queued metadata stay in this Thunderbird profile until Listener acknowledges storage. Retry errors are shown here. Removing the add-on or its data removes its queue.</p></section>
+</main></body></html>

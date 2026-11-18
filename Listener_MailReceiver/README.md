@@ -1,5 +1,7 @@
 # Listener Mail Receiver
 
+For date, sender, receiver and attachment names **without subjects or message text**, use the separate [metadata-only variant](../Listener_MailReceiver_Metadata/README.md).
+
 Separate .NET 10 HTTP service for the [Thunderbird add-on](../Thunderbird_Addon/README.md).
 It stores external-mail alerts in a new `email_alerts` table in the existing
 collector database. It does not alter TCP event rows or send them to the analyzer.

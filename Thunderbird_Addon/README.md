@@ -1,5 +1,7 @@
 # Thunderbird → Listener external-mail alerts
 
+For date, sender, receiver and attachment names **without subjects or message text**, use the separate [metadata-only variant](../Thunderbird_Addon_Metadata/README.md).
+
 MailExtension for **Thunderbird 140 or newer**, plus a small authenticated HTTP
 receiver in [Listener_MailReceiver](../Listener_MailReceiver/README.md). It reports
 **newly received mail from outside configured domains** to Listener. Collection
