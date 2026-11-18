@@ -36,6 +36,7 @@ app.MapGet("/api/pcs", (ViewerDatabase database) => {
         FROM events GROUP BY MONITORED_HOST ORDER BY lastReceived DESC,host
         """));
 });
+app.MapGet("/api/last-minute",(HttpRequest request,ViewerDatabase database)=>LastMinuteSnapshot.Read(request,database));
 app.MapGet("/api/device-overview",(HttpRequest request,ViewerDatabase database)=>
     DeviceOverview.Read(request,database));
 app.MapGet("/api/pc", (HttpRequest request, ViewerDatabase database) => {
