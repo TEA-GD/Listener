@@ -318,50 +318,87 @@ internal static class Database
         using var transaction = db.BeginTransaction();
         using var c = db.CreateCommand();
         c.Transaction = transaction;
-        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        c.CommandText = "PRAGMA table_info(events)";
-        using (var reader = c.ExecuteReader())
-            while (reader.Read()) columns.Add(reader.GetString(1));
-
-        // Rebuild legacy JSON storage atomically; a failure rolls back the whole migration.
-        bool legacy = columns.Contains("payload_json");
-        string table = legacy ? "events_columns" : "events";
-        c.CommandText = $"CREATE TABLE IF NOT EXISTS {table} (" +
-            string.Join(",", CsvFields.Select(f => $"[{f}] TEXT " +
-                (f == "EVENT_ID" ? "PRIMARY KEY NOT NULL" : "NOT NULL DEFAULT ''"))) +
-            ",host TEXT NOT NULL,date_utc TEXT NOT NULL,received_utc TEXT NOT NULL)";
-        c.ExecuteNonQuery();
-        if (legacy)
+        c.CommandText = "SELECT type FROM sqlite_master WHERE name='events'";
+        bool partitioned = (string?)c.ExecuteScalar() == "view";
+        if (!partitioned)
         {
-            string LegacyValue(string field) => field switch
-            {
-                "EVENT_ID" => "event_id",
-                "TIMESTAMP_UTC" => "timestamp_utc",
-                "MONITORED_HOST" => "host",
-                _ => $"COALESCE(CAST(json_extract(payload_json, '$.{field}') AS TEXT),'')"
-            };
-            c.CommandText = "INSERT INTO events_columns (" +
-                string.Join(",", CsvFields.Select(f => $"[{f}]")) + ",host,date_utc,received_utc) SELECT " +
-                string.Join(",", CsvFields.Select(LegacyValue)) + ",host,date_utc,received_utc FROM events";
+            var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            c.CommandText = "PRAGMA table_info(events)";
+            using (var reader = c.ExecuteReader())
+                while (reader.Read()) columns.Add(reader.GetString(1));
+
+            // Rebuild legacy JSON storage atomically; a failure rolls back the whole migration.
+            bool legacy = columns.Contains("payload_json");
+            string table = legacy ? "events_columns" : "events";
+            c.CommandText = $"CREATE TABLE IF NOT EXISTS {table} (" +
+                string.Join(",", CsvFields.Select(f => $"[{f}] TEXT " +
+                    (f == "EVENT_ID" ? "PRIMARY KEY NOT NULL" : "NOT NULL DEFAULT ''"))) +
+                ",host TEXT NOT NULL,date_utc TEXT NOT NULL,received_utc TEXT NOT NULL)";
             c.ExecuteNonQuery();
-            c.CommandText = "DROP TABLE events; ALTER TABLE events_columns RENAME TO events;";
+            if (legacy)
+            {
+                string LegacyValue(string field) => field switch
+                {
+                    "EVENT_ID" => "event_id",
+                    "TIMESTAMP_UTC" => "timestamp_utc",
+                    "MONITORED_HOST" => "host",
+                    _ => $"COALESCE(CAST(json_extract(payload_json, '$.{field}') AS TEXT),'')"
+                };
+                c.CommandText = "INSERT INTO events_columns (rowid," +
+                    string.Join(",", CsvFields.Select(f => $"[{f}]")) + ",host,date_utc,received_utc) SELECT rowid," +
+                    string.Join(",", CsvFields.Select(LegacyValue)) + ",host,date_utc,received_utc FROM events";
+                c.ExecuteNonQuery();
+                c.CommandText = "DROP TABLE events; ALTER TABLE events_columns RENAME TO events;";
+                c.ExecuteNonQuery();
+            }
+            c.CommandText = """
+                CREATE INDEX IF NOT EXISTS idx_events_host_date ON events(host,date_utc,timestamp_utc);
+                CREATE INDEX IF NOT EXISTS idx_events_live ON events(host,EVENT_TYPE,TIMESTAMP_UTC);
+                CREATE INDEX IF NOT EXISTS idx_events_snapshot ON events(host,SNAPSHOT_ID);
+                CREATE TABLE IF NOT EXISTS dirty (
+                    host TEXT NOT NULL,
+                    date_utc TEXT NOT NULL,
+                    generation INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY(host,date_utc)
+                );
+                """;
             c.ExecuteNonQuery();
         }
-        c.CommandText = """
-            CREATE INDEX IF NOT EXISTS idx_events_host_date ON events(host,date_utc,timestamp_utc);
-            CREATE INDEX IF NOT EXISTS idx_events_live ON events(host,EVENT_TYPE,TIMESTAMP_UTC);
-            CREATE INDEX IF NOT EXISTS idx_events_snapshot ON events(host,SNAPSHOT_ID);
-            CREATE TABLE IF NOT EXISTS dirty (
-                host TEXT NOT NULL,
-                date_utc TEXT NOT NULL,
-                generation INTEGER NOT NULL DEFAULT 1,
-                PRIMARY KEY(host,date_utc)
-            );
-            """;
-        c.ExecuteNonQuery();
+        InitializePartitions(db, transaction);
         MailDatabaseSchema.Initialize(db, transaction);
         transaction.Commit();
     }
+    private static void InitializePartitions(SqliteConnection db, SqliteTransaction transaction)
+    {
+        using var c = db.CreateCommand(); c.Transaction = transaction;
+        c.CommandText = "SELECT type FROM sqlite_master WHERE name='events'";
+        bool migrate = (string?)c.ExecuteScalar() == "table";
+        if (migrate) { c.CommandText = "ALTER TABLE events RENAME TO events_legacy"; c.ExecuteNonQuery(); }
+        c.CommandText = "CREATE TABLE IF NOT EXISTS event_registry(sequence INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT NOT NULL UNIQUE,device_category TEXT NOT NULL)";
+        c.ExecuteNonQuery();
+        var categories = new[] { "legacy" }.Concat(WatcherShared.DeviceCategories.Values).ToArray();
+        foreach (string category in categories)
+        {
+            string table = "events_" + category;
+            c.CommandText = $"CREATE TABLE IF NOT EXISTS {table} (" +
+                string.Join(",", CsvFields.Select(f => $"[{f}] TEXT " + (f == "EVENT_ID" ? "PRIMARY KEY NOT NULL" : "NOT NULL DEFAULT ''"))) +
+                ",host TEXT NOT NULL,date_utc TEXT NOT NULL,received_utc TEXT NOT NULL);" +
+                $"CREATE INDEX IF NOT EXISTS idx_{table}_date ON {table}(host,date_utc,TIMESTAMP_UTC);" +
+                $"CREATE INDEX IF NOT EXISTS idx_{table}_live ON {table}(host,EVENT_TYPE,TIMESTAMP_UTC);" +
+                $"CREATE INDEX IF NOT EXISTS idx_{table}_snapshot ON {table}(host,SNAPSHOT_ID);";
+            c.ExecuteNonQuery();
+        }
+        if (migrate)
+        {
+            c.CommandText = "INSERT INTO event_registry(sequence,event_id,device_category) SELECT rowid,EVENT_ID,'legacy' FROM events_legacy ORDER BY rowid";
+            c.ExecuteNonQuery();
+        }
+        c.CommandText = "CREATE VIEW IF NOT EXISTS events AS " + string.Join(" UNION ALL ", categories.Select(category =>
+            "SELECT i.sequence AS rowid," + string.Join(",", CsvFields.Select(f => $"e.[{f}]")) +
+            $",e.host,e.date_utc,e.received_utc,i.device_category AS DEVICE_CATEGORY FROM events_{category} e JOIN event_registry i ON i.event_id=e.EVENT_ID AND i.device_category='{category}'"));
+        c.ExecuteNonQuery();
+    }
+
     public static string Store(string path, JsonElement envelope, string peerIp)
     {
         if (envelope.ValueKind != JsonValueKind.Object || !envelope.TryGetProperty("event", out var row) ||
@@ -373,6 +410,7 @@ internal static class Database
                 throw new ArgumentException("Missing required string field " + name);
             return value.GetString() ?? "";
         }
+        string category = WatcherShared.DeviceCategories.Validate(row.TryGetProperty("DEVICE_CATEGORY", out var categoryValue) ? categoryValue.GetString() : "legacy");
         string host = Required(row, "MONITORED_HOST");
         string eventId = Required(row, "EVENT_ID");
         string eventType = Required(row, "EVENT_TYPE");
@@ -394,9 +432,15 @@ internal static class Database
         trusted["COLLECTOR_PEER_IP"] = peerIp; // ALWAYS overwrite agent-supplied peer IP.
         using var db = Connect(path);
         using var transaction = db.BeginTransaction();
+        using var registry = db.CreateCommand();
+        registry.Transaction = transaction;
+        registry.CommandText = "INSERT INTO event_registry(event_id,device_category) VALUES($id,$category) ON CONFLICT(event_id) DO NOTHING";
+        registry.Parameters.AddWithValue("$id", eventId);
+        registry.Parameters.AddWithValue("$category", category);
+        if (registry.ExecuteNonQuery() == 0) { transaction.Commit(); return eventId; }
         using var insert = db.CreateCommand();
         insert.Transaction = transaction;
-        insert.CommandText = "INSERT OR IGNORE INTO events(" +
+        insert.CommandText = "INSERT INTO events_" + category + "(" +
             string.Join(",", CsvFields.Select(f => $"[{f}]")) + ",host,date_utc,received_utc) VALUES (" +
             string.Join(",", CsvFields.Select((_, i) => "$f" + i)) + ",$host,$day,$now)";
         for (int i = 0; i < CsvFields.Length; i++)

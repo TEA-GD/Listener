@@ -42,13 +42,14 @@ internal sealed class InstallerForm : Form
     private bool _canInstall = true;
     private bool _operationInProgress;
     private readonly CheckBox _deleteData = new();
+    private readonly ComboBox _category = new();
     private readonly CheckBox _collectUdp = new();
 
     public InstallerForm()
     {
         Text = "Watcher Connection Agent — Setup V6";
-        ClientSize = new Size(670, 635);
-        MinimumSize = new Size(670, 635);
+        ClientSize = new Size(670, 695);
+        MinimumSize = new Size(670, 695);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 9F);
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -80,19 +81,25 @@ internal sealed class InstallerForm : Form
         _agentId.Text = DiscoverFqdn();
         Controls.Add(_agentId);
 
+        Controls.Add(new Label { Text = "Device type (destination database table)", Location = new Point(20, 178), AutoSize = true });
+        _category.SetBounds(20, 202, 624, 28);
+        _category.DropDownStyle = ComboBoxStyle.DropDownList;
+        _category.Items.AddRange(WatcherShared.DeviceCategories.Labels);
+        Controls.Add(_category);
+
         _collectUdp.Text = "Monitor UDP endpoints (remote peers may be unavailable)";
-        _collectUdp.SetBounds(20, 180, 624, 24);
+        _collectUdp.SetBounds(20, 240, 624, 24);
         _collectUdp.Checked = true;
         Controls.Add(_collectUdp);
         Controls.Add(new Label {
             Text = "Collector transport: plain TCP; no TLS, no certificates, no tokens. Restrict collector access.",
-            Location = new Point(20, 212), Size = new Size(620, 44)
+            Location = new Point(20, 272), Size = new Size(620, 44)
         });
 
         Controls.Add(new Label {
-            Text = "Installation status and errors", Location = new Point(20, 264), Size = new Size(620, 22)
+            Text = "Installation status and errors", Location = new Point(20, 324), Size = new Size(620, 22)
         });
-        _log.SetBounds(20, 287, 624, 233);
+        _log.SetBounds(20, 347, 624, 233);
         _log.Multiline = true;
         _log.ReadOnly = true;
         _log.ScrollBars = ScrollBars.Vertical;
@@ -102,32 +109,32 @@ internal sealed class InstallerForm : Form
 
         _deleteData.Text = "Also delete local configuration and buffered unsent events (irreversible)";
         _deleteData.AutoSize = true;
-        _deleteData.Location = new Point(20, 536);
+        _deleteData.Location = new Point(20, 596);
         _deleteData.Checked = false; // Explicit opt-in; preserve evidence by default.
         Controls.Add(_deleteData);
 
         _install.Text = "Install / Update";
-        _install.SetBounds(20, 575, 140, 36);
+        _install.SetBounds(20, 635, 140, 36);
         _install.Click += InstallClicked;
         Controls.Add(_install);
 
         _start.Text = "Launch Agent";
-        _start.SetBounds(172, 575, 105, 36);
+        _start.SetBounds(172, 635, 105, 36);
         _start.Click += (_, _) => ExecuteAgentControl(true);
         Controls.Add(_start);
 
         _stop.Text = "Stop Agent";
-        _stop.SetBounds(289, 575, 100, 36);
+        _stop.SetBounds(289, 635, 100, 36);
         _stop.Click += (_, _) => ExecuteAgentControl(false);
         Controls.Add(_stop);
 
         _uninstall.Text = "Uninstall Agent";
-        _uninstall.SetBounds(401, 575, 140, 36);
+        _uninstall.SetBounds(401, 635, 140, 36);
         _uninstall.Click += UninstallClicked;
         Controls.Add(_uninstall);
 
         _close.Text = "Close";
-        _close.SetBounds(553, 575, 91, 36);
+        _close.SetBounds(553, 635, 91, 36);
         _close.Click += (_, _) => Close();
         Controls.Add(_close);
         CancelButton = _close;
@@ -145,6 +152,7 @@ internal sealed class InstallerForm : Form
                 _collectorPort.Value=saved.collector_port;
                 _agentId.Text=saved.agent_id;
                 _collectUdp.Checked=saved.collect_udp;
+                _category.SelectedIndex=Array.IndexOf(WatcherShared.DeviceCategories.Values,saved.device_category);
             }
         }
         catch(Exception ex)
@@ -166,6 +174,8 @@ internal sealed class InstallerForm : Form
             return;
         }
 
+        if (_category.SelectedIndex < 0) { MessageBox.Show(this, "Choose the device type before installing or updating."); return; }
+        string category = WatcherShared.DeviceCategories.Values[_category.SelectedIndex];
         string collectorHost = _collectorHost.Text.Trim();
         int collectorPort = (int)_collectorPort.Value;
         bool collectUdp = _collectUdp.Checked;
@@ -180,7 +190,7 @@ internal sealed class InstallerForm : Form
         Log("Installing agent for " + id + " ...");
         try
         {
-            await Task.Run(() => Install(id, collectorHost, collectorPort, collectUdp, Log));
+            await Task.Run(() => Install(id, collectorHost, collectorPort, collectUdp, category, Log));
             Log("SUCCESS: Agent installed and startup task launched. No tokens are used.");
             MessageBox.Show(this,
                 "Watcher Agent installed.\n\n" +
@@ -244,7 +254,7 @@ internal sealed class InstallerForm : Form
         _operationInProgress = busy;
         _install.Enabled = !busy && _canInstall;
         _start.Enabled = _stop.Enabled = _uninstall.Enabled = _close.Enabled = !busy;
-        _deleteData.Enabled = _agentId.Enabled = _collectorHost.Enabled = _collectorPort.Enabled = _collectUdp.Enabled = !busy;
+        _deleteData.Enabled = _agentId.Enabled = _collectorHost.Enabled = _collectorPort.Enabled = _collectUdp.Enabled = _category.Enabled = !busy;
     }
 
     private async void ExecuteAgentControl(bool launch)
@@ -361,7 +371,7 @@ internal sealed class InstallerForm : Form
         _log.AppendText(Environment.NewLine + $"[{DateTime.Now:HH:mm:ss}] " + message);
     }
 
-    private static void Install(string agentId, string collectorHost, int collectorPort, bool collectUdp, Action<string> log)
+    private static void Install(string agentId, string collectorHost, int collectorPort, bool collectUdp, string category, Action<string> log)
     {
         using var identity = WindowsIdentity.GetCurrent();
         if (!new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator))
@@ -377,7 +387,7 @@ internal sealed class InstallerForm : Form
         InstallationFiles.ProtectConfiguration(config,Run);
         string? existing=ReadExistingConfiguration(config,log);
         string defaultSpool=Path.Combine(DataDir,"spool");
-        string newSettings=InstallationFiles.MergeConfiguration(existing,agentId,collectorHost,collectorPort,collectUdp,defaultSpool);
+        string newSettings=InstallationFiles.MergeConfiguration(existing,agentId,collectorHost,collectorPort,collectUdp,defaultSpool,category);
         var cfg=JsonSerializer.Deserialize<AgentConfig>(newSettings)!;
         // Preserve a configured custom spool; never enumerate/delete pending files during update.
         if(Path.GetFullPath(cfg.spool_dir).Equals(Path.GetFullPath(defaultSpool),StringComparison.OrdinalIgnoreCase))

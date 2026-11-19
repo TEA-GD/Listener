@@ -11,7 +11,7 @@ class ServerAgent(unittest.TestCase):
             root=pathlib.Path(directory)
             env=dict(os.environ,XDG_CACHE_HOME=str(root/'cache'),XDG_CONFIG_HOME=str(root/'config'),TZ='Europe/Moscow')
             with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
-            config={'agent_id':'DC-01.example.local','collector_host':'localhost','collector_port':port,'spool_dir':str(root/'spool'),'log_file':str(root/'agent.log'),'poll_seconds':5,'heartbeat_seconds':60,'max_spool_events':50000,'send_batch_size':1000}
+            config={'device_category':'windows_servers','agent_id':'DC-01.example.local','collector_host':'localhost','collector_port':port,'spool_dir':str(root/'spool'),'log_file':str(root/'agent.log'),'poll_seconds':5,'heartbeat_seconds':60,'max_spool_events':50000,'send_batch_size':1000}
             path=root/'agent.json';path.write_text(json.dumps(config))
             def run(mode):
                 return subprocess.run([pwsh,'-NoLogo','-NoProfile','-File',str(ROOT/'tests/Test-ServerAgent.ps1'),'-AgentScript',str(ROOT/'ServerAgent/Watcher-ServerAgent.ps1'),'-ConfigPath',str(path),'-Mode',mode],env=env,capture_output=True,text=True,timeout=40)
@@ -23,6 +23,7 @@ class ServerAgent(unittest.TestCase):
             self.assertEqual({'ACTIVE_AT_START','TCP_SNAPSHOT','HEARTBEAT'},{r['EVENT_TYPE'] for r in events})
             active=next(r for r in events if r['EVENT_TYPE']=='ACTIVE_AT_START')
             self.assertEqual('server-process.exe',active['PROCESS_NAME'])
+            self.assertTrue(all(r['DEVICE_CATEGORY']=='windows_servers' for r in events))
             self.assertEqual('SNAPSHOT_COMPLETE:1',next(r for r in events if r['EVENT_TYPE']=='HEARTBEAT')['STATE'])
             self.assertEqual(1,len({r['SNAPSHOT_ID'] for r in events}))
             collector={'bind_host':'127.0.0.1','bind_port':port,'database_path':str(root/'events.db'),'csv_dir':str(root/'csv'),'log_file':str(root/'collector.log'),'csv_export_seconds':1,'allowed_client_cidrs':[]}
@@ -38,6 +39,7 @@ class ServerAgent(unittest.TestCase):
                     self.assertEqual([],list((root/'spool').glob('*.json')))
                     with sqlite3.connect(root/'events.db') as db:
                         self.assertEqual(3,db.execute('SELECT count(*) FROM events').fetchone()[0])
+                        self.assertEqual(3,db.execute('SELECT count(*) FROM events_windows_servers').fetchone()[0])
                         self.assertEqual(active['TIMESTAMP_UTC'],db.execute("SELECT TIMESTAMP_UTC FROM events WHERE EVENT_TYPE='ACTIVE_AT_START'").fetchone()[0])
                         self.assertEqual(('DC-01.example.local','192.0.2.10','203.0.113.20','443','127.0.0.1'),db.execute("SELECT MONITORED_HOST,SOURCE_IP,RECIEVER_IP,PORT_USED,COLLECTOR_PEER_IP FROM events WHERE EVENT_TYPE='ACTIVE_AT_START'").fetchone())
                     csv=root/'csv/DC-01.example.local'/f"{events[0]['TIMESTAMP_UTC'][:10]}.csv"

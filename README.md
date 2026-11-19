@@ -2,6 +2,10 @@
 
 **Current architecture and deployment scheme:** [SCHEME.md](SCHEME.md) — components, ports, database tables, snapshots, mail variants and local/domain GUI access.
 
+## Device categories
+
+The agent installer asks for **Linux servers, Windows servers, User PCs, or Project Stands**. The Collector stores each category in its own table, while the GUI and Analyzer retain unified history. Mail alerts keep their dedicated tables. **Update the Collector first**, then rebuild/update agents. Existing data is preserved as unclassified. See [installation choices and migration](DEVICE-STORAGE.md).
+
 ## Integrated mail database and add-ons
 
 The updated Collector and both mail receivers automatically initialize **`email_alerts`** (full text) and **`email_metadata_alerts`** (date, sender, receiver, attachment flag and filenames). Initialization preserves existing data. All three default to `%ProgramData%\WatcherCollector\watcher-events.db`; set the same custom database path on all components if overriding it. The dashboard remains read-only.
@@ -157,10 +161,10 @@ cd Agent
 ./build/build-linux.sh
 ```
 
-The package will be written to `Agent/output/watcher-agent_1.0.2_amd64.deb`. On the target Linux machine:
+The package will be written to `Agent/output/watcher-agent_1.0.3_amd64.deb`. On the target Linux machine:
 
 ```bash
-sudo apt install ./watcher-agent_1.0.2_amd64.deb
+sudo apt install ./watcher-agent_1.0.3_amd64.deb
 sudo systemctl status watcher-agent
 sudo journalctl -u watcher-agent -n 50 --no-pager
 ```

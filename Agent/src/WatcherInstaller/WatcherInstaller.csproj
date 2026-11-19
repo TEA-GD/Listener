@@ -25,4 +25,5 @@
       <EmbeddedResource Include="$(MSBuildProjectDirectory)/payload/WatcherAgent.exe" LogicalName="Watcher.Agent.Payload" />
     </ItemGroup>
   </Target>
+<ItemGroup><Compile Include="../../../Shared/DeviceCategories.cs" Link="DeviceCategories.cs" /></ItemGroup>
 </Project>

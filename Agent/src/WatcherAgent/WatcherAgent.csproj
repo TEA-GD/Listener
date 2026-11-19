@@ -10,4 +10,5 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
+<ItemGroup><Compile Include="../../../Shared/DeviceCategories.cs" Link="DeviceCategories.cs" /></ItemGroup>
 </Project>

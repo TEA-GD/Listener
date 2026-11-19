@@ -116,6 +116,7 @@ internal static class Program
                 foreach (var (type, connection) in changes)
                     events.Add(CreateEvent(cfg.agent_id, snapshot, type, connection));
                 if (heartbeatDue) events.AddRange(CreateSnapshot(cfg.agent_id, snapshot, current.Values));
+                foreach (var row in events) row["DEVICE_CATEGORY"] = cfg.device_category;
                 QueueBatch(cfg.spool_dir, events);
                 previous = current;
                 if (heartbeatDue) lastHeartbeat = DateTimeOffset.UtcNow;

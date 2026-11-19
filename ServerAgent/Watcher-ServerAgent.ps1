@@ -13,6 +13,8 @@ function Read-AgentConfig([string]$Path) {
         if ($null -eq $c.PSObject.Properties[$name]) { throw "Missing configuration field: $name" }
     }
     if ($null -eq $c.PSObject.Properties['collect_udp']) { $c | Add-Member -NotePropertyName collect_udp -NotePropertyValue $true }
+    if ($null -eq $c.PSObject.Properties['device_category']) { $c | Add-Member -NotePropertyName device_category -NotePropertyValue 'legacy' }
+    if ($c.device_category -cnotin @('legacy','linux_servers','windows_servers','user_pcs','project_stands')) { throw 'Invalid device_category' }
     if ($c.collect_udp -isnot [bool]) { throw 'collect_udp must be true or false' }
     if ($c.agent_id -notmatch '^[A-Za-z0-9_.-]{1,120}$' -or $c.agent_id -in @('.','..')) { throw 'Invalid agent_id' }
     $c.collector_host = ([string]$c.collector_host).Trim()
@@ -84,6 +86,7 @@ function Get-ConnectionSnapshot([bool]$CollectUdp=$true) {
 function New-AgentEvent($Config, [string]$Snapshot, [string]$Type, $Connection) {
     $now = [DateTimeOffset]::UtcNow
     $row = [ordered]@{
+        DEVICE_CATEGORY=[string]$Config.device_category
         EVENT_ID=[guid]::NewGuid().ToString('D'); EVENT_TYPE=$Type
         TIMESTAMP_UTC=$now.ToString('yyyy-MM-ddTHH:mm:ss.fffzzz'); DATE_AND_TIME=[DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss.fff')
         SOURCE_IP=''; SOURCE_DOMAIN_NAME=[string]$Config.agent_id; PROCESS_NAME=''; PROCESS_ID=''

@@ -13,4 +13,5 @@
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.14" />
   </ItemGroup>
   <ItemGroup><Compile Include="../../../Shared/MailDatabaseSchema.cs" Link="MailDatabaseSchema.cs" /></ItemGroup>
+<ItemGroup><Compile Include="../../../Shared/DeviceCategories.cs" Link="DeviceCategories.cs" /></ItemGroup>
 </Project>

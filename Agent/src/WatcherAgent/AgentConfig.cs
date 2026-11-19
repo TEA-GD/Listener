@@ -4,6 +4,7 @@ namespace WatcherAgent;
 
 internal sealed class AgentConfig
 {
+    public string device_category { get; set; } = "legacy";
     public string agent_id { get; set; } = "";
     public string spool_dir { get; set; } = "";
     public bool collect_udp { get; set; } = true;
@@ -12,6 +13,7 @@ internal sealed class AgentConfig
 
     public void ValidateCollector()
     {
+        WatcherShared.DeviceCategories.Validate(device_category);
         collector_host = collector_host?.Trim() ?? "";
         if (string.IsNullOrEmpty(collector_host) || Uri.CheckHostName(collector_host) == UriHostNameType.Unknown)
             throw new ArgumentException("Enter a collector DNS hostname, such as collector.example.local (no http://, path or port). IP addresses are also supported.");

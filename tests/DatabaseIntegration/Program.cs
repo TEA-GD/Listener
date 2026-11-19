@@ -19,6 +19,7 @@ internal static class DatabaseIntegration
         try
         {
             foreach (bool legacy in new[] { false, true }) Test(root, legacy);
+            TestPartitions(root);
             TestRollback(root);
             TestUdpStorage(root);
             TestListener(root).GetAwaiter().GetResult();
@@ -29,6 +30,37 @@ internal static class DatabaseIntegration
             SqliteConnection.ClearAllPools();
             Directory.Delete(root, true);
         }
+    }
+
+    private static void TestPartitions(string root)
+    {
+        string path=Path.Combine(root,"partitions.db");
+        Database.Initialize(path);
+        using var db=new SqliteConnection("Data Source="+path); db.Open();
+        using var command=db.CreateCommand();
+        long previous=0;
+        foreach(string category in new[]{"legacy","linux_servers","windows_servers","user_pcs","project_stands"})
+        {
+            var row=new Dictionary<string,string> { ["EVENT_ID"]=Guid.NewGuid().ToString(),["MONITORED_HOST"]="test-device",["EVENT_TYPE"]="HEARTBEAT",["TIMESTAMP_UTC"]="2026-11-19T09:00:00Z" };
+            if(category!="legacy")row["DEVICE_CATEGORY"]=category;
+            using(var envelope=JsonDocument.Parse(JsonSerializer.Serialize(new { @event=row }))) Database.Store(path,envelope.RootElement,"127.0.0.1");
+            command.CommandText=$"SELECT count(*) FROM events_{category}";
+            Check((long)command.ExecuteScalar()! == 1,"Incorrect partition "+category);
+            command.CommandText="SELECT MAX(rowid) FROM events";
+            long current=(long)command.ExecuteScalar()!; Check(current>previous,"Nonmonotonic global rowid");previous=current;
+            row["DEVICE_CATEGORY"]=category=="user_pcs"?"project_stands":"user_pcs";
+            using(var envelope=JsonDocument.Parse(JsonSerializer.Serialize(new { @event=row }))) Database.Store(path,envelope.RootElement,"127.0.0.1");
+            command.CommandText=$"SELECT count(*) FROM events_{category}";
+            Check((long)command.ExecuteScalar()! == 1,"Replay moved original event");
+            row["EVENT_ID"]=Guid.NewGuid().ToString();row["DEVICE_CATEGORY"]="invalid;drop table events";
+            bool rejected=false;
+            try { using var bad=JsonDocument.Parse(JsonSerializer.Serialize(new { @event=row }));Database.Store(path,bad.RootElement,"127.0.0.1"); } catch(ArgumentException){rejected=true;}
+            Check(rejected,"Invalid category accepted");
+        }
+        Database.Initialize(path);
+        command.CommandText="SELECT count(*) FROM events";Check((long)command.ExecuteScalar()! == 5,"Cross-category duplicate");
+        Database.ExportDirty(path,Path.Combine(root,"partition-csv"));
+        Check(File.ReadAllLines(Path.Combine(root,"partition-csv","test-device","2026-11-19.csv")).Length==6,"Partition CSV lost records");
     }
 
     private static void Test(string root, bool legacy)
@@ -50,7 +82,7 @@ internal static class DatabaseIntegration
         if (legacy)
         {
             cmd.CommandText = "CREATE TABLE events(event_id TEXT PRIMARY KEY,host TEXT NOT NULL,date_utc TEXT NOT NULL,timestamp_utc TEXT NOT NULL,payload_json TEXT NOT NULL,received_utc TEXT NOT NULL);" +
-                "INSERT INTO events VALUES($id,'test-host','2026-11-09',$stamp,$json,'original-received');";
+                "INSERT INTO events(rowid,event_id,host,date_utc,timestamp_utc,payload_json,received_utc) VALUES(42,$id,'test-host','2026-11-09',$stamp,$json,'original-received');";
             cmd.Parameters.AddWithValue("$id", row["EVENT_ID"]);
             cmd.Parameters.AddWithValue("$stamp", row["TIMESTAMP_UTC"]);
             cmd.Parameters.AddWithValue("$json", JsonSerializer.Serialize(row));
@@ -61,6 +93,7 @@ internal static class DatabaseIntegration
         Database.Initialize(path);
         cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('email_alerts','email_metadata_alerts')";
         Check((long)cmd.ExecuteScalar()! == 2, "Collector did not initialize both mail tables");
+        if (legacy) { cmd.CommandText="SELECT rowid FROM events"; Check((long)cmd.ExecuteScalar()! == 42,"Migration changed Analyzer checkpoint rowid"); }
         // Verify all migrated values, or all newly stored values, independently.
         if (!legacy)
         {

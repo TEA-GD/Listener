@@ -16,8 +16,10 @@ try
     Directory.CreateDirectory(spool);File.WriteAllText(Path.Combine(spool,"pending.json"),"unsent-evidence");
     string original="""{"agent_id":"PC-01","collector_host":"old.example","collector_port":6515,"collect_udp":false,"spool_dir":"custom-spool","custom_setting":{"keep":true}}""";
     File.WriteAllText(config,original);
-    string merged=InstallationFiles.MergeConfiguration(original,"PC-01","new.example",16515,true,"default-spool");
+    string merged=InstallationFiles.MergeConfiguration(original,"PC-01","new.example",16515,true,"default-spool","project_stands");
     var parsed=JsonNode.Parse(merged)!;
+    Check((string?)parsed["device_category"]=="project_stands","Selected device category missing");
+    Check((string?)JsonNode.Parse(InstallationFiles.MergeConfiguration(merged,"PC","server",6515,true,spool))!["device_category"]=="project_stands","Saved category lost on update");
     Check((string?)parsed["spool_dir"]=="custom-spool","Custom spool was discarded");
     Check((bool?)parsed["custom_setting"]?["keep"]==true,"Unknown existing settings were discarded");
     Check((string?)parsed["collector_host"]=="new.example"&&(int?)parsed["collector_port"]==16515,"Selected settings not updated");

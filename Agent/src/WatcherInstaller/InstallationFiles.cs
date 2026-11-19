@@ -47,10 +47,11 @@ internal static class InstallationFiles
         File.SetAttributes(path,File.GetAttributes(path)&~FileAttributes.ReadOnly);
     }
 
-    internal static string MergeConfiguration(string? existing,string agentId,string collectorHost,int collectorPort,bool collectUdp,string defaultSpool)
+    internal static string MergeConfiguration(string? existing,string agentId,string collectorHost,int collectorPort,bool collectUdp,string defaultSpool,string? category=null)
     {
         var settings=existing is null?new JsonObject():JsonNode.Parse(existing) as JsonObject
             ??throw new InvalidDataException("Existing agent.json must be a JSON object; it was not overwritten.");
+        if(category is not null) settings["device_category"]=WatcherShared.DeviceCategories.Validate(category);
         settings["agent_id"]=agentId;
         settings["collector_host"]=collectorHost;
         settings["collector_port"]=collectorPort;

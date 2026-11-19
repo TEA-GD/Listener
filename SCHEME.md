@@ -97,7 +97,18 @@ C:\ProgramData\WatcherCollector\watcher-events.db
 
 ```mermaid
 flowchart LR
-    C[Collector] --> E[events - network observations]
+    C[Collector] --> L[events_linux_servers]
+    C --> W[events_windows_servers]
+    C --> U[events_user_pcs]
+    C --> S[events_project_stands]
+    C --> O[events_legacy]
+    C --> R[event_registry - global IDs and sequence]
+    L --> E[events - unified read-only view]
+    W --> E
+    U --> E
+    S --> E
+    O --> E
+    R --> E
     C --> D[dirty - pending CSV export generations]
     RF[Full-text receiver] --> F[email_alerts - full-text mail]
     RM[Metadata receiver] --> M[email_metadata_alerts - metadata-only mail]
@@ -112,7 +123,9 @@ flowchart LR
 
 | Table / store | Contents and identity |
 | --- | --- |
-| `events` | Connection events, heartbeats and snapshot rows; `EVENT_ID` is the primary key. Includes agent-reported host, timestamp, process, local/peer addresses and ports, protocol, state, snapshot ID, Collector peer IP and receipt time |
+| `events` view | Unified read-only connection events, heartbeats and snapshots from all device categories, with stable global `rowid` and `DEVICE_CATEGORY` |
+| `events_linux_servers`, `events_windows_servers`, `events_user_pcs`, `events_project_stands`, `events_legacy` | Separate payload tables, each keyed by `EVENT_ID`; process, addresses, ports, state, snapshots and timestamps |
+| `event_registry` | Global event identity, category and monotonic sequence; keeps deduplication and reader checkpoints consistent |
 | `dirty` | Export bookkeeping keyed by host and UTC day; tracks CSV generations |
 | `email_alerts` | Full-text mail fields, subject, decoded inline text/MIME parts, visible recipients, attachment filenames and delivery identifiers |
 | `email_metadata_alerts` | Message date, sender, recipients, attachment flag and filenames, plus delivery/deduplication identifiers and receipt time; no subject/body columns |
@@ -121,7 +134,7 @@ flowchart LR
 | Analyzer `profiles.db` | Separate local database in `state_directory`: device/destination/connection/UDP profiles, day histories, cooldowns, source cursor metadata and alert outbox |
 | CSV / JSONL | Collector daily per-device CSV exports; optional Analyzer alert JSONL output |
 
-The Collector and **both receivers** initialize both mail tables using `Shared/MailDatabaseSchema.cs`. The Collector additionally initializes/migrates `events` and `dirty`. A receiver can create the database/mail tables before the Collector starts. The GUI does not create or migrate tables and opens its database read-only. The Analyzer writes only its separate state/output, not the source event database.
+The Collector and **both receivers** initialize both mail tables using `Shared/MailDatabaseSchema.cs`. The Collector additionally initializes/migrates the connection partitions, `event_registry`, the `events` view and `dirty`. A receiver can create the database/mail tables before the Collector starts. The GUI does not create or migrate tables and opens its database read-only. The Analyzer writes only its separate state/output, not the source event database.
 
 Mail alerts and connection events have separate identities; there is no automatic foreign-key relationship joining a mail `client_label` to a monitored host. Use consistent labels operationally if you want to recognize the same PC in both views.
 
@@ -239,3 +252,7 @@ Default Agent configuration/spool location: `C:\ProgramData\WatcherAgent`. Defau
 | No Analyzer alerts | Analyzer running, baseline/warm-up and age/cooldown rules, valid source DB, output path/share permissions and local outbox |
 
 Component guides: [Agent](Agent/README.md), [Linux Agent](Agent/README-linux.md), [ServerAgent](ServerAgent/README.md), [Collector](Collector/README.md), [GUI](Listener_DB_GUI/README.md), [Analyzer](Listener_Analyzer/README.md), [full-text mail](Listener_MailReceiver/README.md), [metadata-only mail](Listener_MailReceiver_Metadata/README.md).
+
+## Device storage categories
+
+Agents tag events with the device type selected during installation. The Collector stores payloads in separate category tables and exposes the unified `events` view to existing readers. Existing data remains in `events_legacy`, with original rowids preserved in `event_registry`. Mail retains its separate full-text and metadata tables. See [storage choices, installation and migration](DEVICE-STORAGE.md).

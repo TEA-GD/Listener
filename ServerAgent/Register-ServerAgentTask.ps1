@@ -5,6 +5,7 @@ param(
     [Parameter(Mandatory=$true)][string]$CollectorHost,
     [ValidateRange(1,65535)][int]$CollectorPort = 6515,
     [string]$AgentId,
+    [ValidateSet("linux_servers","windows_servers","user_pcs","project_stands")][string]$DeviceCategory,
     [ValidateRange(1,3600)][int]$PollSeconds = 5
 )
 Set-StrictMode -Version Latest
@@ -20,6 +21,7 @@ if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw 'Keep Watcher-
 if (Test-Path -LiteralPath $configPath) {
     $existing = Get-Content -LiteralPath $configPath -Encoding UTF8 -Raw | ConvertFrom-Json
     if ([string]::IsNullOrWhiteSpace($AgentId)) { $AgentId = [string]$existing.agent_id }
+    if (-not $DeviceCategory -and $existing.PSObject.Properties['device_category']) { $DeviceCategory=[string]$existing.device_category }
     if ($existing.PSObject.Properties['collect_udp']) { if ($existing.collect_udp -isnot [bool]) { throw 'Existing collect_udp must be boolean' }; $collectUdp=$existing.collect_udp }
 }
 if ([string]::IsNullOrWhiteSpace($AgentId)) {
@@ -28,6 +30,8 @@ if ([string]::IsNullOrWhiteSpace($AgentId)) {
     if ($domain -and -not $AgentId.EndsWith('.' + $domain,[StringComparison]::OrdinalIgnoreCase)) { $AgentId += '.' + $domain }
 }
 if ($AgentId -notmatch '^[A-Za-z0-9_.-]{1,120}$' -or $AgentId -in @('.','..')) { throw 'Invalid AgentId; use a hostname with letters, digits, dots, underscores or hyphens.' }
+if (-not $DeviceCategory -or $DeviceCategory -eq 'legacy') { $DeviceCategory = Read-Host 'Device type: linux_servers, windows_servers, user_pcs, project_stands' }
+if ($DeviceCategory -cnotin @('linux_servers','windows_servers','user_pcs','project_stands')) { throw 'Choose a valid DeviceCategory' }
 $previous = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($previous) {
     Stop-ScheduledTask -TaskName $taskName
@@ -46,7 +50,7 @@ if ([IO.Path]::GetFullPath($source) -ne [IO.Path]::GetFullPath($script)) { Copy-
 $spool = Join-Path $directory 'spool'
 [IO.Directory]::CreateDirectory($spool) | Out-Null
 $config = [ordered]@{
-    agent_id=$AgentId; collector_host=$CollectorHost; collector_port=$CollectorPort; collect_udp=$collectUdp
+    device_category=$DeviceCategory; agent_id=$AgentId; collector_host=$CollectorHost; collector_port=$CollectorPort; collect_udp=$collectUdp
     spool_dir=$spool; log_file=(Join-Path $directory 'agent.log')
     poll_seconds=$PollSeconds; heartbeat_seconds=60; max_spool_events=50000; send_batch_size=1000
 }

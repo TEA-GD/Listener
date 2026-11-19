@@ -18,7 +18,7 @@ case "${VERSION_ID:-}" in
   13) RUNTIME_DEPENDS='libc6 (>= 2.41), libgcc-s1, libstdc++6, libssl3t64, libicu76, zlib1g' ;;
   *) echo "Unsupported Debian release: ${VERSION_ID:-unknown}. Supported: 12, 13." >&2; exit 1 ;;
 esac
-PACKAGE_VERSION=1.0.2
+PACKAGE_VERSION=1.0.3
 echo "Building Watcher Agent $PACKAGE_VERSION for Debian $VERSION_ID amd64"
 OUT="$ROOT/output/linux-agent"
 BUILD="$ROOT/output/deb-stage"
@@ -48,13 +48,26 @@ set -e
 if [ "$1" = configure ]; then
   install -d -m 700 /etc/watcher-agent /var/lib/watcher-agent /var/lib/watcher-agent/spool
   # Automatic configuration: no enrollment, no token. Preserve config on upgrades.
+  if [ ! -e /etc/watcher-agent/agent.json ] || ! grep -q '"device_category"' /etc/watcher-agent/agent.json; then
+    CATEGORY="${WATCHER_DEVICE_CATEGORY:-}"
+    if [ -z "$CATEGORY" ] && [ -t 0 ]; then
+      printf 'Device type (linux_servers, windows_servers, user_pcs, project_stands): '
+      read -r CATEGORY
+    fi
+    case "$CATEGORY" in linux_servers|windows_servers|user_pcs|project_stands) ;; *) echo 'Set WATCHER_DEVICE_CATEGORY to a valid device type for unattended installation.' >&2; exit 1;; esac
+  fi
   if [ ! -e /etc/watcher-agent/agent.json ]; then
     HOST_ID="$(hostname -f 2>/dev/null || hostname)"
     # Hostnames from the OS are expected to be DNS-compatible.
     case "$HOST_ID" in *[!A-Za-z0-9_.-]*|''|.|..) HOST_ID="$(hostname)" ;; esac
     case "$HOST_ID" in *[!A-Za-z0-9_.-]*|''|.|..) echo 'Invalid hostname: cannot configure Watcher agent' >&2; exit 1;; esac
-    printf '{"agent_id":"%s","spool_dir":"/var/lib/watcher-agent/spool"}\n' "$HOST_ID" > /etc/watcher-agent/agent.json
+    printf '{"agent_id":"%s","device_category":"%s","spool_dir":"/var/lib/watcher-agent/spool"}\n' "$HOST_ID" "$CATEGORY" > /etc/watcher-agent/agent.json
     chmod 600 /etc/watcher-agent/agent.json
+  fi
+  if ! grep -q '"device_category"' /etc/watcher-agent/agent.json; then
+    sed '0,/{/s/{/{"device_category":"'"$CATEGORY"'",/' /etc/watcher-agent/agent.json > /etc/watcher-agent/agent.json.category-tmp
+    chmod 600 /etc/watcher-agent/agent.json.category-tmp
+    mv /etc/watcher-agent/agent.json.category-tmp /etc/watcher-agent/agent.json
   fi
   if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload || true

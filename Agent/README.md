@@ -30,3 +30,7 @@ The Agent installer now has **Launch Agent** and **Stop Agent** buttons alongsid
 Commands run asynchronously, with other installer actions disabled until completion. Use the rebuilt installer elevated; an agent must already be installed before Launch Agent can work. These controls do not uninstall the agent or change monitoring settings.
 
 Portable lifecycle regression checks: `dotnet run --project tests/AgentControls -c Release`. Actual Task Scheduler/process control and button layout require verification on a Windows test PC.
+
+## Device category
+
+Setup now requires a **Device type** selection: Linux servers, Windows servers, User PCs, or Project Stands. Updates load the saved choice; older configurations without a choice require selection once. Future events are tagged with that category before entering the spool. Updates preserve queued events with their original category. Update the Collector first. See [device storage and migration](../DEVICE-STORAGE.md).

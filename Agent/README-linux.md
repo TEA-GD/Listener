@@ -37,8 +37,8 @@ From the existing repository root:
 ```bash
 git pull --ff-only
 bash Agent/build/build-linux.sh
-dpkg-deb -f Agent/output/watcher-agent_1.0.2_amd64.deb Version Depends
-sudo apt install ./Agent/output/watcher-agent_1.0.2_amd64.deb
+dpkg-deb -f Agent/output/watcher-agent_1.0.3_amd64.deb Version Depends
+sudo apt install ./Agent/output/watcher-agent_1.0.3_amd64.deb
 ```
 
 APT installs the declared dependencies from your configured repositories. If it
@@ -55,6 +55,7 @@ Example:
 ```json
 {
   "agent_id": "linux-server01.example.local",
+  "device_category": "linux_servers",
   "spool_dir": "/var/lib/watcher-agent/spool",
   "collector_host": "collector.example.local",
   "collector_port": 6515
@@ -83,7 +84,7 @@ After building:
 
 ```bash
 python tests/test_linux_package.py
-apt-get -s install ./Agent/output/watcher-agent_1.0.2_amd64.deb
+apt-get -s install ./Agent/output/watcher-agent_1.0.3_amd64.deb
 ```
 
 Tests extract the package without installing it, check service/script paths and
@@ -91,3 +92,13 @@ permissions, run the packaged binary, and verify heartbeat delivery plus ACK
 cleanup against a local test TCP receiver. APT `-s` simulates dependency solving;
 it does not install or enable the service. Real systemd startup and reboot checks
 must still be performed on the target server.
+
+## Device category
+
+The package asks for `linux_servers`, `windows_servers`, `user_pcs`, or `project_stands` when creating a configuration or upgrading one without a category. For unattended installation, pass the choice explicitly:
+
+```bash
+sudo env WATCHER_DEVICE_CATEGORY=linux_servers apt install ./Agent/output/watcher-agent_1.0.3_amd64.deb
+```
+
+A saved category is preserved on upgrade. To change it later, edit `device_category` in `/etc/watcher-agent/agent.json` and restart `watcher-agent`. Already queued events retain their original category. Update the Collector first; see [device storage](../DEVICE-STORAGE.md).

@@ -34,7 +34,7 @@ class Verify(unittest.TestCase):
         self.assertIn('File.Delete(path);', self.agent)
         self.assertIn('transaction.Commit();', self.collector)
         self.assertLess(self.collector.find('transaction.Commit();'), self.collector.find('return eventId;'))
-        self.assertIn('INSERT OR IGNORE INTO events', self.collector)
+        self.assertIn('ON CONFLICT(event_id) DO NOTHING', self.collector)
         self.assertIn('NetworkStream', 'NetworkStream')
         self.assertIn('tcp.GetStream()', self.agent)
         self.assertIn('client.GetStream()', self.collector)

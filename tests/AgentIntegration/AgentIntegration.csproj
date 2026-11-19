@@ -9,4 +9,5 @@
   <ItemGroup>
     <Compile Include="../../Agent/src/WatcherAgent/*.cs" Link="Agent/%(Filename)%(Extension)" />
   </ItemGroup>
+<ItemGroup><Compile Include="../../Shared/DeviceCategories.cs" Link="DeviceCategories.cs" /></ItemGroup>
 </Project>
