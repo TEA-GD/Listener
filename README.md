@@ -333,3 +333,8 @@ The dashboard's top **Last minute** tab provides a frozen 60-second connection f
 ## GUI launcher: local or domain-network access
 
 Run `Listener_DB_GUI/Launch-Windows.bat`, choose **Local only** or **Domain network**, and click **Start GUI**. Domain mode shows the URL other users can open and optionally configures the Windows Domain-profile inbound rule for the chosen port. This enables network access, not AD sign-in; mail viewing still requires its key. [Setup and command-line options](Listener_DB_GUI/README.md#local-or-domain-network-launcher).
+
+
+## Device online status and timeline
+
+The Overview IP box now shows **blue online / red offline**, current or last online duration, and a **Show online graph** link. The graph shows daily online totals and hourly periods, with date/time-zone controls. Availability is estimated from retained agent heartbeats with a default two-minute grace interval. [Details](Listener_DB_GUI/README.md#online-status-and-daily-availability-timeline).

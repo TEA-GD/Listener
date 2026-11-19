@@ -214,3 +214,31 @@ Test-NetConnection GUI-HOST.your-domain -Port 5080
 ```
 
 Only the GUI host needs the server executable/database. Starting Domain mode does not redeploy agents or change their Collector address. Both local and network startup reuse the same read-only dashboard and existing features.
+
+## Online status and daily availability timeline
+
+Select a device in the main list. Its **Overview IP box** uses **blue for online**, **red for offline**, and neutral grey when no usable heartbeat history exists. It shows the current online duration, or offline duration and the last online period. If no current socket IP is available, a concrete local IP from previous reports is labelled **last recorded**; Collector-observed/NAT addresses remain separate.
+
+Click **Show online graph** in that box to open `online.html?host=...`. The page shows:
+
+- Current status and current/most recent online period.
+- Online and offline/no-report duration for the selected dates.
+- One timeline row per local calendar day, with daily online totals and hourly ticks.
+- Blue online periods, red gaps without recent heartbeats, and grey unobserved/future time.
+- Hover/focus details and an expandable table of exact online periods.
+
+The default range is the last seven days, with up to 90 days per view. The default time zone is the browser's; choose an IANA zone such as `Europe/Moscow`, `Europe/Berlin` or `UTC`. Day lengths, daily clipping and offsets account for daylight-saving changes. The page and main device box refresh every ten seconds while visible.
+
+### What online means
+
+Availability is inferred from `HEARTBEAT` **event timestamps**, not the time old queued events arrive at the Collector. Each heartbeat covers a configurable grace interval (default **120 seconds**). Overlapping/touching intervals form one online period; gaps longer than the grace interval split periods. An ongoing period ends at the current time for duration calculations. An expired period ends at its final heartbeat plus the grace interval.
+
+This estimates **monitoring availability**, not OS boot uptime or confirmed power state. An agent, network or Collector outage can all produce a red no-report gap, and brief outages inside the grace interval may not be visible. Before the first retained heartbeat the history is unknown. Delayed records can fill historical periods without making a device online now; future-dated heartbeats are ignored. The same reported host identity groups the history, so use unique agent IDs.
+
+`OnlineTimeoutSeconds` configures the grace interval for the GUI (30–3600 seconds). Set it above any custom agent heartbeat interval. For example, from the published GUI folder:
+
+```powershell
+.\Listener_DB_GUI.exe --OnlineTimeoutSeconds 300
+```
+
+Changing it recalculates the estimate from retained heartbeats. No availability tables, new agent protocol or database writes are introduced; rebuild/restart the GUI to use the feature. The history API is `/api/availability?host=PC-01&from=2026-11-13&to=2026-11-19&tz=Europe%2FMoscow`.

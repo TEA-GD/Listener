@@ -3,6 +3,7 @@
 'use strict';
 const $=id=>document.getElementById(id);
 const make=(tag,text)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;return node;};
+const duration=value=>{let s=Math.max(0,Math.floor(value||0));const d=Math.floor(s/86400);s%=86400;const h=Math.floor(s/3600);s%=3600;const m=Math.floor(s/60);return (d?d+'d ':'')+(h?h+'h ':'')+(m?m+'m ':'')+(s%60)+'s';};
 const time=value=>value?new Date(value).toISOString().replace('T',' ').replace('Z',' UTC'):'—';
 let host=null,page=1,total=0,controller=null;
 function clear(){host=null;controller?.abort();$('deviceOverview').hidden=true;}
@@ -32,6 +33,11 @@ async function refresh(){
         const messages={fresh:'Recent agent report',stale:'Stale — showing last known connections',snapshot_required:'Complete snapshot unavailable — update Collector, then agent',updating:'New snapshot still arriving — showing previous state',clock_skew:'Device clock differs from the Collector — verify its time'};
         $('overviewStatus').textContent=messages[data.status]||data.status;$('overviewStatus').className='report-state '+data.status;
         $('deviceIPs').textContent=data.device_ips.join(', ')||'No routed local IP reported';
+        $('deviceIPLabel').textContent=data.ip_source==='last_reported'?'Device IP · last recorded local address':'Device IP addresses · reported local interfaces';
+        const presence=data.availability;
+        $('deviceIPs').className='device-ip-'+presence.status;
+        $('deviceOnlineStatus').title='Based on agent heartbeats. Last heartbeat: '+time(presence.last_heartbeat_utc)+'; timeout: '+presence.timeout_seconds+' seconds.';
+        $('deviceOnlineStatus').textContent=presence.status==='online'?'Online for '+duration(presence.current_online_seconds):presence.status==='offline'?'Offline for '+duration((new Date(presence.generated_utc)-new Date(presence.offline_since_utc))/1000)+' · Last online period: '+duration(presence.last_session_online_seconds):'Status unknown — no usable heartbeat reports';
         $('peerIP').textContent='Collector sees: '+(data.collector_peer_ip||'unavailable')+' (may be NAT or loopback)';
         $('activeTCP').textContent=data.status==='snapshot_required'?'—':data.tcp;
         $('activeUDP').textContent=data.status==='snapshot_required'?'—':data.udp;
@@ -43,9 +49,9 @@ async function refresh(){
         if(!data.connections.length){const row=make('tr'),cell=make('td',data.status==='snapshot_required'?'This agent has not sent a complete snapshot yet.':'No connections in the latest reported state.');cell.colSpan=9;row.append(cell);$('activeRows').append(row);}
         $('activePage').textContent=`${total} reported connections · Page ${page} of ${Math.max(1,Math.ceil(total/50))}`;
         $('activePrev').disabled=page===1;$('activeNext').disabled=page*50>=total;
-    }catch(e){if(e.name!=='AbortError'){$('overviewStatus').textContent='Overview unavailable: '+e.message;$('overviewStatus').className='report-state stale';}}
+    }catch(e){if(e.name!=='AbortError'){$('overviewStatus').textContent='Overview unavailable: '+e.message;$('overviewStatus').className='report-state stale';$('deviceIPs').className='device-ip-unknown';$('deviceOnlineStatus').textContent='Availability could not be refreshed';}}
 }
-window.ListenerOverview={select(value){host=value;page=1;total=0;$('deviceOverview').hidden=false;$('deviceIPs').textContent='Loading…';$('peerIP').textContent='';$('activeTCP').textContent=$('activeUDP').textContent=$('averageMinute').textContent='—';$('activeRows').replaceChildren();$('minuteChart').replaceChildren();$('minuteData').replaceChildren();$('overviewTimes').textContent='';$('rateSummary').textContent='';$('overviewStatus').textContent='Loading latest report…';$('overviewStatus').className='report-state';$('activePage').textContent='';$('activePrev').disabled=$('activeNext').disabled=true;refresh();},refresh,clear};
+window.ListenerOverview={select(value){host=value;page=1;total=0;$('deviceOverview').hidden=false;$('deviceIPs').textContent='Loading…';$('deviceIPs').className='device-ip-unknown';$('deviceOnlineStatus').textContent='Checking availability…';$('onlineGraph').href='online.html?host='+encodeURIComponent(value);$('peerIP').textContent='';$('activeTCP').textContent=$('activeUDP').textContent=$('averageMinute').textContent='—';$('activeRows').replaceChildren();$('minuteChart').replaceChildren();$('minuteData').replaceChildren();$('overviewTimes').textContent='';$('rateSummary').textContent='';$('overviewStatus').textContent='Loading latest report…';$('overviewStatus').className='report-state';$('activePage').textContent='';$('activePrev').disabled=$('activeNext').disabled=true;refresh();},refresh,clear};
 $('activePrev').onclick=()=>{if(page>1){page--;refresh();}};
 $('activeNext').onclick=()=>{if(page*50<total){page++;refresh();}};
 $('overviewRefresh').onclick=refresh;

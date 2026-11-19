@@ -1,6 +1,6 @@
 # Listener — system scheme
 
-Updated **18 November 2026**. Describes the implementation at [f994bcd](https://github.com/TEA-GD/Listener/commit/f994bcdde3ed28ae2447d0e63f344d748267a22f), including complete connection snapshots, the Last minute tab, Agent launch/stop controls, and the local/domain GUI launcher.
+Updated **19 November 2026**. Describes the current repository, including complete connection snapshots, Last minute captures, heartbeat availability timelines, Agent launch/stop controls, and the local/domain GUI launcher.
 
 ## 1. Overall architecture
 
@@ -175,6 +175,14 @@ A frozen frame of the 60 seconds ending at the capture timestamp. Includes long-
 The table shows process/PID, local/peer IPs and ports, last evidence time, and present/closed/absent/unknown status. Paging reuses the capture timestamp and database row watermark, so incoming or late/backdated records do not shift the frame. **Capture latest minute** creates a new frame. It is an inspection view, not a permanently stored screenshot/archive.
 
 Polling can miss very short-lived connections. Older agents without complete snapshots can show recent observations, but their current state remains unknown.
+
+### Online history page
+
+The Overview IP box is blue when a valid agent heartbeat is newer than the configured grace interval (default 120 seconds), red when reports have expired, and grey if there is no usable heartbeat history. It shows the current online period or offline/last-online duration. **Show online graph** opens the daily/hourly timeline for that device.
+
+The GUI derives online periods by merging intervals from each heartbeat timestamp through heartbeat plus grace, clipped to the current time. Historical gaps after the first retained report are offline/no-report periods; earlier history is unknown. Delayed reports fill history without proving current availability, and future timestamps are ignored. This is estimated reporting availability, not confirmed power state or OS uptime.
+
+The graph defaults to seven days in the browser time zone, supports up to 90 days per view and accounts for daylight-saving day lengths. It shows daily online totals and exact period times, and refreshes every ten seconds. Computation reads the existing `events` table; no new database tables or agent protocol changes are required.
 
 ## 5. Mail collection variants
 

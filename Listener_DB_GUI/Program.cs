@@ -10,6 +10,9 @@ builder.Services.AddSingleton(new ViewerDatabase(
     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WatcherCollector", "watcher-events.db")));
 string mailViewToken=Environment.GetEnvironmentVariable("LISTENER_MAIL_VIEW_TOKEN")??(Environment.GetEnvironmentVariable("LISTENER_MAIL_VIEW_TOKEN_FILE") is string mailKeyPath?File.ReadAllText(mailKeyPath).Trim():"");
 if(mailViewToken.Length>0&&mailViewToken.Length<32)throw new ArgumentException("Mail viewing key must contain at least 32 characters.");
+int onlineTimeout=int.TryParse(builder.Configuration["OnlineTimeoutSeconds"]??"120",out int configuredTimeout)?configuredTimeout:throw new ArgumentException("OnlineTimeoutSeconds must be an integer.");
+if(onlineTimeout<30||onlineTimeout>3600)throw new ArgumentException("OnlineTimeoutSeconds must be 30–3600.");
+builder.Services.AddSingleton(new DeviceAvailability(onlineTimeout));
 var app = builder.Build();
 app.Use(async (context, next) => {
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -37,8 +40,9 @@ app.MapGet("/api/pcs", (ViewerDatabase database) => {
         """));
 });
 app.MapGet("/api/last-minute",(HttpRequest request,ViewerDatabase database)=>LastMinuteSnapshot.Read(request,database));
-app.MapGet("/api/device-overview",(HttpRequest request,ViewerDatabase database)=>
-    DeviceOverview.Read(request,database));
+app.MapGet("/api/device-overview",(HttpRequest request,ViewerDatabase database,DeviceAvailability availability)=>
+    DeviceOverview.Read(request,database,availability));
+app.MapGet("/api/availability",(HttpRequest request,ViewerDatabase database,DeviceAvailability availability)=>availability.Read(request,database));
 app.MapGet("/api/pc", (HttpRequest request, ViewerDatabase database) => {
     string host = request.Query["host"].ToString();
     if (string.IsNullOrWhiteSpace(host) || host.Length > 120) throw new ArgumentException("Choose a valid PC.");
