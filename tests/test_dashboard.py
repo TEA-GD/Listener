@@ -184,6 +184,27 @@ class Dashboard(unittest.TestCase):
             expect(page.locator('#protocol')).to_have_value('UDP');expect(page.locator('#resultCount')).to_have_text('1 matching events')
             browser.close()
 
+    def test_lazy_reports_and_paused_hidden_overview(self):
+        from playwright.sync_api import sync_playwright, expect
+        with sync_playwright() as p:
+            browser=p.chromium.launch(headless=True,args=['--no-sandbox'],executable_path=shutil.which('chromium'))
+            page=browser.new_page();page.clock.install();requests=[]
+            page.on('request',lambda request:requests.append(request.url))
+            page.goto(self.url);page.get_by_role('button',name='PC-01',exact=False).click()
+            expect(page.locator('#resultCount')).to_have_text('121 matching events')
+            expect(page.locator('#from')).to_have_value('2026-11-09');expect(page.locator('#to')).to_have_value('2026-11-09')
+            self.assertFalse(any('/api/connections?' in request for request in requests))
+            page.get_by_role('tab',name='Last minute',exact=True).click()
+            expect(page.locator('#minuteTimes')).to_contain_text('Frozen capture:')
+            count=sum('/api/device-overview?' in request for request in requests)
+            page.clock.fast_forward(11000);page.wait_for_timeout(200)
+            self.assertEqual(count,sum('/api/device-overview?' in request for request in requests))
+            page.get_by_role('tab',name='Overview',exact=True).click()
+            expect(page.locator('#resultCount')).to_have_text('121 matching events')
+            page.get_by_role('button',name='Reset',exact=True).click()
+            expect(page.locator('#from')).to_have_value('');expect(page.locator('#to')).to_have_value('')
+            browser.close()
+
     def test_browser(self):
         from playwright.sync_api import sync_playwright, expect
         with sync_playwright() as p:
@@ -193,6 +214,8 @@ class Dashboard(unittest.TestCase):
             page.goto(self.url)
             page.get_by_role('button',name='PC-01',exact=False).click()
             expect(page.locator("#resultCount")).to_have_text("121 matching events")
+            expect(page.locator('#connectionStatus')).to_contain_text('click Check connections')
+            page.get_by_role('button',name='Check connections',exact=True).click()
             expect(page.locator('#connectionSummary')).to_have_text('1 new · 0 returned')
             page.get_by_role('button',name='Show events for 203.0.113.1',exact=True).click()
             expect(page.locator('#destination')).to_have_value('203.0.113.1')

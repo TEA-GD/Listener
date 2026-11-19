@@ -7,4 +7,5 @@
   </ItemGroup>
   <ItemGroup><Compile Include="../../Shared/MailDatabaseSchema.cs" Link="MailDatabaseSchema.cs" /></ItemGroup>
 <ItemGroup><Compile Include="../../Shared/DeviceCategories.cs" Link="DeviceCategories.cs" /></ItemGroup>
+<ItemGroup><Compile Include="../../Shared/GuiReadModel.cs" Link="GuiReadModel.cs" /></ItemGroup>
 </Project>

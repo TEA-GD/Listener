@@ -31,6 +31,8 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 app.MapGet("/api/pcs", (ViewerDatabase database) => {
     using var db = database.Open();
+    if(ViewerDatabase.HasReadModel(db))
+        return Results.Ok(ViewerDatabase.Query(db,"SELECT host,events,lastEvent,lastReceived,processes,destinations FROM gui_devices ORDER BY lastReceived DESC,host"));
     return Results.Ok(ViewerDatabase.Query(db, """
         SELECT MONITORED_HOST AS host, COUNT(*) AS events,
           MAX(TIMESTAMP_UTC) AS lastEvent, MAX(received_utc) AS lastReceived,
@@ -219,6 +221,8 @@ sealed class ViewerDatabase(string path)
         }
         catch { db.Dispose(); throw; }
     }
+    public static bool HasReadModel(SqliteConnection db) => Query(db,"SELECT 1 FROM sqlite_master WHERE type='table' AND name='gui_schema'").Count>0 &&
+        Query(db,"SELECT 1 FROM gui_schema WHERE version=1").Count>0;
     public static List<Dictionary<string, object?>> Query(SqliteConnection db, string sql, Dictionary<string, object>? parameters = null) {
         using var cmd = db.CreateCommand();
         cmd.CommandText = sql;

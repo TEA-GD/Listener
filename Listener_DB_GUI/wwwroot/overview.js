@@ -24,7 +24,7 @@ function chart(data){
     $('minuteData').replaceChildren();for(const b of data.buckets){const row=make('tr');for(const value of [time(b.minute),b.tcp,b.udp])row.append(make('td',value));$('minuteData').append(row);}
 }
 async function refresh(){
-    if(!host)return;controller?.abort();const request=new AbortController();controller=request;const selected=host;
+    if(!host||window.ListenerTabs?.active()!=='overview')return;controller?.abort();const request=new AbortController();controller=request;const selected=host;
     try{
         const response=await fetch('/api/device-overview?'+new URLSearchParams({host:selected,page}),{signal:request.signal});const data=await response.json();
         if(!response.ok)throw Error(data.error||'Could not load device overview.');
@@ -50,11 +50,12 @@ async function refresh(){
         $('activePage').textContent=`${total} reported connections · Page ${page} of ${Math.max(1,Math.ceil(total/50))}`;
         $('activePrev').disabled=page===1;$('activeNext').disabled=page*50>=total;
     }catch(e){if(e.name!=='AbortError'){$('overviewStatus').textContent='Overview unavailable: '+e.message;$('overviewStatus').className='report-state stale';$('deviceIPs').className='device-ip-unknown';$('deviceOnlineStatus').textContent='Availability could not be refreshed';}}
+    finally{if(controller===request)controller=null;}
 }
-window.ListenerOverview={select(value){host=value;page=1;total=0;$('deviceOverview').hidden=false;$('deviceIPs').textContent='Loading…';$('deviceIPs').className='device-ip-unknown';$('deviceOnlineStatus').textContent='Checking availability…';$('onlineGraph').href='online.html?host='+encodeURIComponent(value);$('peerIP').textContent='';$('activeTCP').textContent=$('activeUDP').textContent=$('averageMinute').textContent='—';$('activeRows').replaceChildren();$('minuteChart').replaceChildren();$('minuteData').replaceChildren();$('overviewTimes').textContent='';$('rateSummary').textContent='';$('overviewStatus').textContent='Loading latest report…';$('overviewStatus').className='report-state';$('activePage').textContent='';$('activePrev').disabled=$('activeNext').disabled=true;refresh();},refresh,clear};
+window.ListenerOverview={select(value){host=value;page=1;total=0;$('deviceOverview').hidden=false;$('deviceIPs').textContent='Loading…';$('deviceIPs').className='device-ip-unknown';$('deviceOnlineStatus').textContent='Checking availability…';$('onlineGraph').href='online.html?host='+encodeURIComponent(value);$('peerIP').textContent='';$('activeTCP').textContent=$('activeUDP').textContent=$('averageMinute').textContent='—';$('activeRows').replaceChildren();$('minuteChart').replaceChildren();$('minuteData').replaceChildren();$('overviewTimes').textContent='';$('rateSummary').textContent='';$('overviewStatus').textContent='Loading latest report…';$('overviewStatus').className='report-state';$('activePage').textContent='';$('activePrev').disabled=$('activeNext').disabled=true;refresh();},refresh,pause(){controller?.abort();controller=null;},clear};
 $('activePrev').onclick=()=>{if(page>1){page--;refresh();}};
 $('activeNext').onclick=()=>{if(page*50<total){page++;refresh();}};
 $('overviewRefresh').onclick=refresh;
-setInterval(()=>{if(host&&!document.hidden)refresh();},10000);
+setInterval(()=>{if(host&&!document.hidden&&!controller&&window.ListenerTabs?.active()==='overview')refresh();},10000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});
 })();

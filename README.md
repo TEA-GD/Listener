@@ -2,6 +2,10 @@
 
 **Current architecture and deployment scheme:** [SCHEME.md](SCHEME.md) — components, ports, database tables, snapshots, mail variants and local/domain GUI access.
 
+## GUI performance
+
+Update the Collector and GUI together for maintained device summaries, indexed heartbeat history and lighter page loading. Existing data is preserved. See [deployment steps and measured query improvements](Listener_DB_GUI/PERFORMANCE.md).
+
 ## Device categories
 
 The agent installer asks for **Linux servers, Windows servers, User PCs, or Project Stands**. The Collector stores each category in its own table, while the GUI and Analyzer retain unified history. Mail alerts keep their dedicated tables. **Update the Collector first**, then rebuild/update agents. Existing data is preserved as unclassified. See [installation choices and migration](DEVICE-STORAGE.md).

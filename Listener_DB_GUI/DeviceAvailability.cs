@@ -1,9 +1,15 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Caching.Memory;
 
 // Availability is inferred from heartbeats, never from receipt time or socket counts.
-internal sealed class DeviceAvailability(int timeoutSeconds)
+internal sealed class DeviceAvailability(int timeoutSeconds) : IDisposable
 {
+    private readonly MemoryCache historyCache=new(new MemoryCacheOptions { SizeLimit=200000 });
+    public void Dispose()=>historyCache.Dispose();
+    private History Slice(History history,long start,long end)=>history with {
+        Sessions=history.Sessions.Where(s=>(s.End(timeoutSeconds)>start&&s.Start<end)||s==history.Latest).ToList()
+    };
     internal sealed record Session(long Start,long Last)
     {
         internal long End(int timeout)=>Last+timeout*1000L;
@@ -11,21 +17,30 @@ internal sealed class DeviceAvailability(int timeoutSeconds)
     internal sealed record History(List<Session> Sessions,long? First,Session? Latest);
     internal History Load(SqliteConnection db,string host,DateTimeOffset now,long rangeStart,long rangeEnd)
     {
-        const string sql="""
-            WITH stamps AS (
-                SELECT DISTINCT CAST(ROUND((julianday(TIMESTAMP_UTC)-2440587.5)*86400000) AS INTEGER) AS t
-                FROM events WHERE host=$host AND EVENT_TYPE='HEARTBEAT'
-            ), valid AS (SELECT t FROM stamps WHERE t IS NOT NULL AND t<=$now),
+        bool summarized=ViewerDatabase.HasReadModel(db);
+        object? cacheKey=null;
+        if(summarized){
+            var version=ViewerDatabase.Query(db,"SELECT heartbeat_revision,(SELECT MAX(stamp_ms) FROM gui_heartbeats WHERE host=$host AND stamp_ms<=$now) AS eligible FROM gui_devices WHERE host=$host",
+                new(){{"$host",host},{"$now",now.ToUnixTimeMilliseconds()}}).FirstOrDefault();
+            cacheKey=(db.DataSource,host,version?.GetValueOrDefault("heartbeat_revision"),version?.GetValueOrDefault("eligible"));
+            if(historyCache.TryGetValue(cacheKey,out History? cached)&&cached is not null)return Slice(cached,rangeStart,rangeEnd);
+        }
+        string stamps=summarized?"SELECT stamp_ms AS t FROM gui_heartbeats WHERE host=$host":
+            "SELECT DISTINCT CAST(ROUND((julianday(TIMESTAMP_UTC)-2440587.5)*86400000) AS INTEGER) AS t FROM events WHERE host=$host AND EVENT_TYPE='HEARTBEAT'";
+        string sql="WITH stamps AS ("+stamps+"),"+"""
+            valid AS (SELECT t FROM stamps WHERE t IS NOT NULL AND t<=$now),
             previous AS (SELECT t,LAG(t) OVER(ORDER BY t) AS p FROM valid),
             grouped AS (SELECT t,SUM(CASE WHEN p IS NULL OR t-p>$timeout THEN 1 ELSE 0 END) OVER(ORDER BY t) AS g FROM previous),
-            sessions AS (SELECT MIN(t) AS started,MAX(t) AS last FROM grouped GROUP BY g),
-            annotated AS (SELECT *,MIN(started) OVER() AS first,MAX(last) OVER() AS newest FROM sessions)
-            SELECT started,last,first,newest FROM annotated
-            WHERE (last+$timeout>$start AND started<$end) OR last=newest ORDER BY started
+            sessions AS (SELECT MIN(t) AS started,MAX(t) AS last FROM grouped GROUP BY g)
+            SELECT started,last FROM sessions ORDER BY started
             """;
-        var rows=ViewerDatabase.Query(db,sql,new(){{"$host",host},{"$now",now.ToUnixTimeMilliseconds()},{"$timeout",timeoutSeconds*1000L},{"$start",rangeStart},{"$end",rangeEnd}});
+        var rows=ViewerDatabase.Query(db,sql,new(){{"$host",host},{"$now",now.ToUnixTimeMilliseconds()},{"$timeout",timeoutSeconds*1000L}});
         var sessions=rows.Select(r=>new Session(Convert.ToInt64(r["started"]),Convert.ToInt64(r["last"]))).ToList();
-        return new(sessions,rows.Count==0?null:Convert.ToInt64(rows[0]["first"]),sessions.Count==0?null:sessions.MaxBy(s=>s.Last));
+        var history=new History(sessions,sessions.Count==0?null:sessions[0].Start,sessions.Count==0?null:sessions[^1]);
+        if(cacheKey is not null&&sessions.Count<=200000)historyCache.Set(cacheKey,history,new MemoryCacheEntryOptions {
+            Size=Math.Max(1,sessions.Count),AbsoluteExpirationRelativeToNow=TimeSpan.FromMinutes(15)
+        });
+        return Slice(history,rangeStart,rangeEnd);
     }
     internal object Summary(History history,DateTimeOffset now)
     {

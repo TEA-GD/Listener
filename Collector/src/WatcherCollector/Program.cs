@@ -365,6 +365,7 @@ internal static class Database
             c.ExecuteNonQuery();
         }
         InitializePartitions(db, transaction);
+        GuiReadModel.Initialize(db, transaction);
         MailDatabaseSchema.Initialize(db, transaction);
         transaction.Commit();
     }
@@ -385,7 +386,9 @@ internal static class Database
                 ",host TEXT NOT NULL,date_utc TEXT NOT NULL,received_utc TEXT NOT NULL);" +
                 $"CREATE INDEX IF NOT EXISTS idx_{table}_date ON {table}(host,date_utc,TIMESTAMP_UTC);" +
                 $"CREATE INDEX IF NOT EXISTS idx_{table}_live ON {table}(host,EVENT_TYPE,TIMESTAMP_UTC);" +
-                $"CREATE INDEX IF NOT EXISTS idx_{table}_snapshot ON {table}(host,SNAPSHOT_ID);";
+                $"CREATE INDEX IF NOT EXISTS idx_{table}_snapshot ON {table}(host,SNAPSHOT_ID);" +
+                $"CREATE INDEX IF NOT EXISTS idx_{table}_time ON {table}(host,TIMESTAMP_UTC DESC,EVENT_ID);" +
+                $"CREATE INDEX IF NOT EXISTS idx_{table}_event_time ON {table}(host,julianday(TIMESTAMP_UTC) DESC,EVENT_ID DESC);";
             c.ExecuteNonQuery();
         }
         if (migrate)
@@ -454,6 +457,8 @@ internal static class Database
         int inserted = insert.ExecuteNonQuery();
         if (inserted > 0)
         {
+            GuiReadModel.Store(db, transaction, host, timestamp, insert.Parameters["$now"].Value!.ToString()!,
+                trusted.GetValueOrDefault("PROCESS_NAME")?.ToString() ?? "",trusted.GetValueOrDefault("RECIEVER_IP")?.ToString() ?? "",eventType=="HEARTBEAT");
             using var dirty = db.CreateCommand();
             dirty.Transaction = transaction;
             dirty.CommandText = "INSERT INTO dirty(host,date_utc,generation) VALUES ($host,$day,1) ON CONFLICT(host,date_utc) DO UPDATE SET generation=generation+1";

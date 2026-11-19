@@ -50,7 +50,7 @@ async function capture(fresh=true){
     }catch(e){if(e.name!=='AbortError'){$('minuteStatus').textContent='Capture unavailable: '+e.message;$('minuteStatus').className='report-state stale';if(fresh){$('minuteRows').replaceChildren();$('minuteTimes').textContent='No new frame captured.';}}}
     finally{if(controller===request)$('minuteCapture').disabled=!host;}
 }
-function selectTab(name){active=name;renderTabs();if(name==='minute'&&host&&at===null)capture();}
+function selectTab(name){active=name;renderTabs();document.dispatchEvent(new CustomEvent('listener-tab',{detail:name}));if(name==='minute'&&host&&at===null)capture();}
 window.ListenerTabs={active:()=>active,selectHost(value){if(value!==host){host=value;reset();}renderTabs();if(active==='minute'&&host&&at===null)capture();},clear(){host=null;reset();renderTabs();}};
 $('overviewTab').onclick=()=>selectTab('overview');$('minuteTab').onclick=()=>selectTab('minute');
 $('mainTabs').onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();selectTab(e.key==='Home'?'overview':e.key==='End'?'minute':active==='overview'?'minute':'overview');$(active+'Tab').focus();};

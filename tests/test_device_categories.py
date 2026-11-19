@@ -62,11 +62,32 @@ class DeviceCategoryTests(unittest.TestCase):
                         try:get('/api/pcs');break
                         except OSError:time.sleep(.05)
                     else:log.seek(0);self.fail(log.read())
+                    def assert_summary():
+                        pcs=get('/api/pcs')
+                        with sqlite3.connect(database) as db:
+                            raw=db.execute("SELECT MONITORED_HOST,count(*),max(TIMESTAMP_UTC),max(received_utc),count(DISTINCT NULLIF(PROCESS_NAME,'')),count(DISTINCT NULLIF(RECIEVER_IP,'')) FROM events GROUP BY MONITORED_HOST ORDER BY max(received_utc) DESC,MONITORED_HOST").fetchall()
+                        self.assertEqual(raw,[(p['host'],p['events'],p['lastEvent'],p['lastReceived'],p['processes'],p['destinations']) for p in pcs])
+                    assert_summary()
                     overview=get('/api/device-overview?host=old-device')
                     self.assertEqual('online',overview['availability']['status'])
                     capture=get('/api/last-minute?host=old-device');self.assertGreater(capture['watermark'],42)
                     self.assertEqual('fresh',capture['status'])
                     get('/api/availability?host=old-device')
+                    # Cached sessions must invalidate for delayed heartbeats that bridge a gap.
+                    def heartbeat(seconds):
+                        row=event('old-device',category='project_stands');row['TIMESTAMP_UTC']=(now+timedelta(seconds=seconds)).isoformat();send(row);return row
+                    heartbeat(-200)
+                    before=get('/api/device-overview?host=old-device')['availability']
+                    heartbeat(-110)
+                    after=get('/api/device-overview?host=old-device')['availability']
+                    self.assertNotEqual(before['online_since_utc'],after['online_since_utc'])
+                    self.assertEqual(190,(datetime.fromisoformat(before['online_since_utc'])-datetime.fromisoformat(after['online_since_utc'])).total_seconds())
+                    future=heartbeat(600)
+                    self.assertEqual(after['last_heartbeat_utc'],get('/api/device-overview?host=old-device')['availability']['last_heartbeat_utc'])
+                    # Cross-category dimensions are counted once, and replay has no effect.
+                    row=event('old-device','TCP_CONNECTED','linux_servers');row.update(PROCESS_NAME='worker',RECIEVER_IP='203.0.113.1')
+                    send(row);send(row);row['EVENT_ID']=str(uuid.uuid4());row['DEVICE_CATEGORY']='user_pcs';send(row)
+                    assert_summary()
                     pcs=get('/api/pcs');self.assertIn('project_stands',json.dumps(pcs));self.assertIn('old-device',json.dumps(pcs))
                 finally:
                     for process in reversed(processes):

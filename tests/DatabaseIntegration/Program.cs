@@ -58,6 +58,9 @@ internal static class DatabaseIntegration
             Check(rejected,"Invalid category accepted");
         }
         Database.Initialize(path);
+        command.CommandText="SELECT events FROM gui_devices WHERE host='test-device'";Check((long)command.ExecuteScalar()! == 5,"Summary counted duplicate replay");
+        command.CommandText="SELECT count(*) FROM gui_heartbeats WHERE host='test-device'";Check((long)command.ExecuteScalar()! == 1,"Heartbeat timestamps not deduplicated");
+        command.CommandText="SELECT heartbeat_revision FROM gui_devices WHERE host='test-device'";Check((long)command.ExecuteScalar()! == 1,"Duplicate heartbeat invalidates cache");
         command.CommandText="SELECT count(*) FROM events";Check((long)command.ExecuteScalar()! == 5,"Cross-category duplicate");
         Database.ExportDirty(path,Path.Combine(root,"partition-csv"));
         Check(File.ReadAllLines(Path.Combine(root,"partition-csv","test-device","2026-11-19.csv")).Length==6,"Partition CSV lost records");
@@ -105,6 +108,11 @@ internal static class DatabaseIntegration
         }
         cmd.CommandText = "SELECT COUNT(*) FROM events";
         Check((long)cmd.ExecuteScalar()! == 1, "Duplicate event inserted");
+        cmd.CommandText="SELECT events,processes,destinations,lastEvent,lastReceived FROM gui_devices WHERE host='test-host'";
+        using(var summary=cmd.ExecuteReader()) {
+            Check(summary.Read()&&summary.GetInt64(0)==1&&summary.GetInt64(1)==1&&summary.GetInt64(2)==1,"Summary counters differ from raw records");
+            Check(summary.GetString(3)==row["TIMESTAMP_UTC"],"Summary latest timestamp differs");
+        }
         cmd.CommandText = "PRAGMA table_info(events)";
         using (var schema = cmd.ExecuteReader())
             while (schema.Read()) Check(schema.GetString(1) != "payload_json", "JSON blob column remains");

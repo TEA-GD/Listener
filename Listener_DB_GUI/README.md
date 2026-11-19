@@ -242,3 +242,7 @@ This estimates **monitoring availability**, not OS boot uptime or confirmed powe
 ```
 
 Changing it recalculates the estimate from retained heartbeats. No availability tables, new agent protocol or database writes are introduced; rebuild/restart the GUI to use the feature. The history API is `/api/availability?host=PC-01&from=2026-11-13&to=2026-11-19&tz=Europe%2FMoscow`.
+
+## Faster device views
+
+Update the Collector and GUI together to use maintained device summaries, indexed heartbeat history and cached online sessions. Initial history shows the latest recorded UTC day; clear the dates or use Reset for all retained history. The new/returning destination report runs on **Check connections**. See [deployment steps, benchmarks and limitations](PERFORMANCE.md).

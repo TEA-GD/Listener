@@ -126,6 +126,7 @@ flowchart LR
 | `events` view | Unified read-only connection events, heartbeats and snapshots from all device categories, with stable global `rowid` and `DEVICE_CATEGORY` |
 | `events_linux_servers`, `events_windows_servers`, `events_user_pcs`, `events_project_stands`, `events_legacy` | Separate payload tables, each keyed by `EVENT_ID`; process, addresses, ports, state, snapshots and timestamps |
 | `event_registry` | Global event identity, category and monotonic sequence; keeps deduplication and reader checkpoints consistent |
+| `gui_devices`, `gui_dimensions`, `gui_heartbeats`, `gui_schema` | Collector-maintained device counters, distinct dimensions, indexed heartbeat stamps and read-model version; derived from connection events |
 | `dirty` | Export bookkeeping keyed by host and UTC day; tracks CSV generations |
 | `email_alerts` | Full-text mail fields, subject, decoded inline text/MIME parts, visible recipients, attachment filenames and delivery identifiers |
 | `email_metadata_alerts` | Message date, sender, recipients, attachment flag and filenames, plus delivery/deduplication identifiers and receipt time; no subject/body columns |
@@ -256,3 +257,7 @@ Component guides: [Agent](Agent/README.md), [Linux Agent](Agent/README-linux.md)
 ## Device storage categories
 
 Agents tag events with the device type selected during installation. The Collector stores payloads in separate category tables and exposes the unified `events` view to existing readers. Existing data remains in `events_legacy`, with original rowids preserved in `event_registry`. Mail retains its separate full-text and metadata tables. See [storage choices, installation and migration](DEVICE-STORAGE.md).
+
+## GUI read performance
+
+The Collector maintains derived `gui_*` tables in the event transaction. The read-only GUI uses device summaries and indexed heartbeat stamps, caches sessions until heartbeat data changes, and initially scopes history to the latest recorded UTC day. The connection comparison report is loaded on request. See [performance deployment and measurements](Listener_DB_GUI/PERFORMANCE.md).
