@@ -273,3 +273,7 @@ The compiled-agent installer creates/replaces an explicit SYSTEM startup task th
 ## Device-folder navigation
 
 The GUI sidebar groups devices into Win Server, Linux Server, User PCs and Project Stand, using the newest categorized event for each device (event-time order, global sequence to break ties). Legacy-only devices appear in Unclassified. Folder navigation does not move historical records or split a device's combined history. See [device folders](Listener_DB_GUI/README.md#device-folders).
+
+## Offline replay and orange timeline
+
+Agents retain unsent events locally, replay original timestamps/IDs after reconnection and delete files only after matching durable Collector ACKs. Slow replay yields between acknowledged events so collection can resume. The Collector maintains `gui_heartbeat_delivery(host,stamp_ms,received_ms)` as derived receipt history (GUI schema marker 2), using the earliest receipt for duplicate heartbeat stamps. The GUI colors working intervals orange when their heartbeat delivery delay exceeds its threshold; blue represents timely reports, red missing heartbeat evidence. Orange is reconstructed after delivery and does not identify the exact cause of a connectivity interruption. See [deployment, thresholds and limits](Listener_DB_GUI/README.md#orange-working-periods-after-offline-replay).

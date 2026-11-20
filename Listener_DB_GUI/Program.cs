@@ -12,7 +12,9 @@ string mailViewToken=Environment.GetEnvironmentVariable("LISTENER_MAIL_VIEW_TOKE
 if(mailViewToken.Length>0&&mailViewToken.Length<32)throw new ArgumentException("Mail viewing key must contain at least 32 characters.");
 int onlineTimeout=int.TryParse(builder.Configuration["OnlineTimeoutSeconds"]??"120",out int configuredTimeout)?configuredTimeout:throw new ArgumentException("OnlineTimeoutSeconds must be an integer.");
 if(onlineTimeout<30||onlineTimeout>3600)throw new ArgumentException("OnlineTimeoutSeconds must be 30–3600.");
-builder.Services.AddSingleton(new DeviceAvailability(onlineTimeout));
+int deliveryDelay=builder.Configuration.GetValue("BufferedDeliverySeconds",120);
+if(deliveryDelay<30||deliveryDelay>3600)throw new ArgumentException("BufferedDeliverySeconds must be 30–3600.");
+builder.Services.AddSingleton(new DeviceAvailability(onlineTimeout,deliveryDelay));
 builder.Services.AddSingleton<IReverseNameLookup,ReverseNameLookup>();
 builder.Services.AddSingleton<ConnectionNames>(services=>new ConnectionNames(services.GetRequiredService<IReverseNameLookup>(),
     builder.Configuration.GetValue("ResolveConnectionNames",true)));

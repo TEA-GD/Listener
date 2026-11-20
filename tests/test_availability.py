@@ -10,7 +10,7 @@ class AvailabilityTests(unittest.TestCase):
     def heartbeat(self,host,stamp,received=None):
         stamp=stamp.isoformat() if isinstance(stamp,datetime) else stamp
         row=dict.fromkeys(fixtures.FIELDS,'');row.update(EVENT_ID=str(uuid.uuid4()),EVENT_TYPE='HEARTBEAT',TIMESTAMP_UTC=stamp,MONITORED_HOST=host,SNAPSHOT_ID='presence',COLLECTOR_PEER_IP='192.0.2.1')
-        with sqlite3.connect(self.db) as db:db.execute('INSERT INTO events VALUES('+','.join('?' for _ in range(len(fixtures.FIELDS)+3))+')',[row[f] for f in fixtures.FIELDS]+[host,stamp[:10],received or datetime.now(timezone.utc).isoformat()])
+        with sqlite3.connect(self.db) as db:db.execute('INSERT INTO events VALUES('+','.join('?' for _ in range(len(fixtures.FIELDS)+3))+')',[row[f] for f in fixtures.FIELDS]+[host,stamp[:10],received or stamp])
     def get(self,host='Live-PC',**params):
         with urllib.request.urlopen(self.url+'/api/availability?'+urllib.parse.urlencode({'host':host,**params})) as response:return json.load(response)
     def overview(self,host):

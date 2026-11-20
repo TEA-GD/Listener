@@ -46,3 +46,5 @@ The script creates a temporary database and runs the real Collector migration. I
 ## Maintenance
 
 Treat the `gui_*` tables as Collector-owned derived data. Direct inserts/deletes into physical event partitions bypass maintenance and are unsupported. If a deliberate offline database repair changes historical rows, stop the Collector and GUI, make a backup, run `DELETE FROM gui_schema WHERE version=1`, then start the updated Collector to rebuild summaries; restart the GUI to clear cached sessions. Normal upgrades and event delivery do not require this step.
+
+The offline replay update also maintains `gui_heartbeat_delivery` (schema marker 2) with earliest receipt timestamps. The timeline uses these indexed rows for orange delayed-delivery intervals; heartbeat cache revisions change when receipt evidence changes. Existing working-time totals remain compatible. See [orange timeline behavior](README.md#orange-working-periods-after-offline-replay).

@@ -14,24 +14,24 @@ function draw(data){
     const summary=data.summary;
     $('onlineState').textContent=summary.status==='online'?'Online':summary.status==='offline'?'Offline':'Unknown';$('onlineState').className='device-ip-'+summary.status;
     $('onlineCurrentPeriod').textContent=summary.status==='online'?'Online for '+duration(summary.current_online_seconds)+' · since '+local(summary.online_since_utc,data.timezone):summary.status==='offline'?'No recent report since '+local(summary.offline_since_utc,data.timezone):'No usable retained heartbeat reports';
-    $('onlineRangeTotal').textContent=duration(data.total_online_seconds);$('offlineRangeTotal').textContent=duration(data.total_offline_seconds);
+    $('onlineRangeTotal').textContent=duration(data.total_online_seconds);$('bufferedRangeTotal').textContent=duration(data.total_buffered_seconds);$('offlineRangeTotal').textContent=duration(data.total_offline_seconds);
     $('onlineLastPeriod').textContent=summary.last_session_start_utc?duration(summary.last_session_online_seconds):'—';$('onlineLastHeartbeat').textContent='Last heartbeat: '+local(summary.last_heartbeat_utc,data.timezone);
     $('onlineSubtitle').textContent='Reported availability in '+data.timezone+' · refreshed '+local(data.generated_utc,data.timezone);
-    $('onlineMethod').textContent='A heartbeat keeps a device online for '+summary.timeout_seconds+' seconds. Current and last online periods use retained history; the selected date range controls the daily chart and totals. Up to 90 days per view.';
+    $('onlineMethod').textContent='A heartbeat keeps a device online for '+summary.timeout_seconds+' seconds. Orange means heartbeat delivery was delayed by more than '+summary.delivery_delay_seconds+' seconds; it can only be reconstructed after buffered reports arrive. Current and last online periods use retained history; the selected date range controls the daily chart and totals. Up to 90 days per view.';
     $('onlineTimelineSummary').textContent=data.from+' → '+data.to+' · '+data.timezone;
     $('onlineTimeline').replaceChildren();$('onlinePeriods').replaceChildren();
     const ns='http://www.w3.org/2000/svg';
     for(const day of data.days){
         const row=make('section');row.className='online-day';
-        const caption=make('div');caption.className='online-day-caption';caption.append(make('strong',day.date),make('span',duration(day.online_seconds)+' online'));row.append(caption);
-        const scroll=make('div');scroll.className='online-day-scroll';const svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 1000 64');svg.setAttribute('role','img');svg.setAttribute('aria-label',day.date+': '+duration(day.online_seconds)+' online');
+        const caption=make('div');caption.className='online-day-caption';caption.append(make('strong',day.date),make('span',duration(day.online_seconds)+' working · '+duration(day.buffered_seconds)+' delayed'));row.append(caption);
+        const scroll=make('div');scroll.className='online-day-scroll';const svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 1000 64');svg.setAttribute('role','img');svg.setAttribute('aria-label',day.date+': '+duration(day.online_seconds)+' working · '+duration(day.buffered_seconds)+' delayed');
         const add=(tag,attrs,text)=>{const n=document.createElementNS(ns,tag);for(const [key,value] of Object.entries(attrs))n.setAttribute(key,value);if(text!==undefined)n.textContent=text;svg.append(n);return n;};
         const full=Math.max(1,day.day_seconds);
         for(const segment of day.segments){
             const rect=add('rect',{x:20+segment.offset_seconds/full*960,y:12,width:Math.max(.4,segment.duration_seconds/full*960),height:24,class:'availability-segment '+segment.status,tabindex:0});
-            const label=(segment.status==='online'?'Online (estimated)':segment.status==='offline'?'Offline / no recent reports':segment.status==='future'?'Future time':'Unknown before first retained report')+' · '+segment.start_local+' → '+segment.end_local+' · '+duration(segment.duration_seconds);
+            const label=(segment.status==='buffered'?'Working; reports delivered late':segment.status==='online'?'Working; timely reports (estimated)':segment.status==='offline'?'Offline / no recent reports':segment.status==='future'?'Future time':'Unknown before first retained report')+' · '+segment.start_local+' → '+segment.end_local+' · '+duration(segment.duration_seconds);
             rect.setAttribute('aria-label',label);const title=document.createElementNS(ns,'title');title.textContent=label;rect.append(title);
-            if(segment.status==='online'){const tr=make('tr');for(const value of [day.date,segment.start_local,segment.end_local,duration(segment.duration_seconds)])tr.append(make('td',value));$('onlinePeriods').append(tr);}
+            if(segment.status==='online'||segment.status==='buffered'){const tr=make('tr');for(const value of [day.date,segment.start_local,segment.end_local,duration(segment.duration_seconds),segment.status==='buffered'?'Buffered / delayed':'Timely reports'])tr.append(make('td',value));$('onlinePeriods').append(tr);}
         }
         for(let i=0;i<day.ticks.length;i++){
             const tick=day.ticks[i],x=20+tick.offset_seconds/full*960;
@@ -40,7 +40,7 @@ function draw(data){
         }
         scroll.append(svg);row.append(scroll);$('onlineTimeline').append(row);
     }
-    if(!$('onlinePeriods').children.length){const tr=make('tr'),td=make('td','No reported online periods in these dates.');td.colSpan=4;tr.append(td);$('onlinePeriods').append(tr);}
+    if(!$('onlinePeriods').children.length){const tr=make('tr'),td=make('td','No reported online periods in these dates.');td.colSpan=5;tr.append(td);$('onlinePeriods').append(tr);}
 }
 async function load(auto=false){
     if(!host){error('Choose a device in the main dashboard and click Show online graph.');return;}

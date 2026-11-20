@@ -133,6 +133,7 @@ function Read-CollectorAck([IO.Stream]$Stream) {
 function Send-Spool($Config) {
     $files = @(Get-ChildItem -LiteralPath $Config.spool_dir -Filter '*.json' -File | Sort-Object Name | Select-Object -First $Config.send_batch_size)
     if ($files.Count -eq 0) { return 0 }
+    $sendBudget = [Diagnostics.Stopwatch]::StartNew()
     $client = [Net.Sockets.TcpClient]::new()
     try {
         $connect = $client.ConnectAsync($Config.collector_host, $Config.collector_port)
@@ -141,6 +142,7 @@ function Send-Spool($Config) {
         $stream = $client.GetStream(); $stream.ReadTimeout=10000; $stream.WriteTimeout=10000
         $sent = 0
         foreach ($file in $files) {
+            if ($sent -gt 0 -and $sendBudget.Elapsed.TotalSeconds -ge 5) { break }
             $raw = [IO.File]::ReadAllText($file.FullName)
             $body = $raw | ConvertFrom-Json
             $id = [string]$body.EVENT_ID

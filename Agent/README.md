@@ -52,3 +52,7 @@ Get-ScheduledTask -TaskName 'Watcher-Connection-Agent' | Select-Object TaskName,
 Expected settings are `False`, `False`, `PT0S`. Start the task on battery, unplug/reconnect AC, close the setup window, and confirm it stays `Running` and delivers/buffers events. Windows sleep, hibernation and shutdown still suspend monitoring; these settings do not keep the notebook awake.
 
 Portable task-definition checks: `dotnet run --project tests/AgentTaskDefinition -c Release`. The generated XML was also checked against the [Microsoft Task Scheduler schema](https://learn.microsoft.com/en-us/windows/win32/taskschd/task-scheduler-schema). Actual Task Scheduler execution and power transitions require Windows.
+
+## Offline delivery and timeline
+
+Unacknowledged events stay in the local spool across Collector/network outages and agent restarts. Reconnection retries the original payloads; only matching durable Collector ACKs delete files. Slow replay batches yield after roughly five seconds between acknowledged events so sampling resumes; an in-flight send may take its normal timeout. The default spool limit is 50,000 events; a full spool preserves pending files and refuses new collection. The updated Collector/GUI can mark delayed working periods orange after these heartbeats arrive; see [orange timeline semantics and upgrade order](../Listener_DB_GUI/README.md#orange-working-periods-after-offline-replay).

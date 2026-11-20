@@ -48,7 +48,32 @@ internal static class AgentIntegration
         var empty=(List<Dictionary<string,string>>)createSnapshot.Invoke(null,new object[]{"agent","empty",Array.Empty<Connection>()})!;
         Check(empty.Count==1&&empty[0]["STATE"]=="SNAPSHOT_COMPLETE:0","Empty state must reset prior sockets");
         foreach (bool acknowledge in new[] { true, false }) await TestDelivery(acknowledge);
+        await TestSlowBacklog();
         Console.WriteLine("PASS: hostname configuration, legacy defaults, validation, DNS TCP delivery, ACK deletion and failed-ACK retention");
+    }
+
+    private static async Task TestSlowBacklog()
+    {
+        string root=Path.Combine(Path.GetTempPath(),"watcher-slow-backlog-"+Guid.NewGuid());Directory.CreateDirectory(root);
+        var listener=new TcpListener(IPAddress.Loopback,0);listener.Start();
+        try{
+            const string stamp="2026-11-01T00:00:00Z";
+            for(int i=0;i<8;i++)File.WriteAllText(Path.Combine(root,i.ToString("D4")+".json"),JsonSerializer.Serialize(new { EVENT_ID=Guid.NewGuid().ToString(),TIMESTAMP_UTC=stamp }));
+            var server=Task.Run(async()=>{
+                using var client=await listener.AcceptTcpClientAsync();using var stream=client.GetStream();using var reader=new StreamReader(stream);
+                while(await reader.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15)) is string line){
+                    using var data=JsonDocument.Parse(line);var row=data.RootElement.GetProperty("event");
+                    Check(row.GetProperty("TIMESTAMP_UTC").GetString()==stamp,"Replay replaced original timestamp");
+                    await Task.Delay(1100);await stream.WriteAsync(Encoding.ASCII.GetBytes("ACK "+row.GetProperty("EVENT_ID").GetString()+"\n"));
+                }
+            });
+            var config=new AgentConfig { collector_host="localhost",collector_port=((IPEndPoint)listener.LocalEndpoint).Port,spool_dir=root };
+            int sent=await Task.Run(()=>(int)typeof(WatcherAgent.Program).GetMethod("SendQueuedEvents",BindingFlags.NonPublic|BindingFlags.Static)!.Invoke(null,new object[]{config})!);
+            await server;
+            Check(sent>0&&sent<8,"Slow replay did not yield to collection");
+            Check(Directory.GetFiles(root,"*.json").Length==8-sent,"Unsent backlog was lost");
+        }
+        finally{listener.Stop();Directory.Delete(root,true);}
     }
 
     private static void TestUdp()

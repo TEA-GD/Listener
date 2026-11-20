@@ -62,6 +62,10 @@ internal static class DatabaseIntegration
         command.CommandText="SELECT count(*) FROM gui_heartbeats WHERE host='test-device'";Check((long)command.ExecuteScalar()! == 1,"Heartbeat timestamps not deduplicated");
         command.CommandText="SELECT heartbeat_revision FROM gui_devices WHERE host='test-device'";Check((long)command.ExecuteScalar()! == 1,"Duplicate heartbeat invalidates cache");
         command.CommandText="SELECT count(*) FROM events";Check((long)command.ExecuteScalar()! == 5,"Cross-category duplicate");
+        command.CommandText="DROP TABLE gui_heartbeat_delivery; DELETE FROM gui_schema WHERE version=2";command.ExecuteNonQuery();
+        Database.Initialize(path);Database.Initialize(path);
+        command.CommandText="SELECT count(*) FROM gui_heartbeat_delivery";Check((long)command.ExecuteScalar()! == 1,"V1 delivery backfill lost/doubled heartbeat");
+        command.CommandText="SELECT count(*) FROM gui_heartbeat_delivery WHERE received_ms>stamp_ms";Check((long)command.ExecuteScalar()! == 1,"Backfill lost original receipt delay");
         Database.ExportDirty(path,Path.Combine(root,"partition-csv"));
         Check(File.ReadAllLines(Path.Combine(root,"partition-csv","test-device","2026-11-19.csv")).Length==6,"Partition CSV lost records");
     }

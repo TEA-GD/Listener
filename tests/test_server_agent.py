@@ -1,8 +1,30 @@
 """PowerShell agent checks + real collector/SQLite/CSV delivery; Windows cmdlets are mocked."""
-import json, os, pathlib, shutil, socket, sqlite3, subprocess, tempfile, threading, time, unittest
+import json, os, pathlib, shutil, socket, sqlite3, subprocess, tempfile, threading, time, unittest, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 
 class ServerAgent(unittest.TestCase):
+    def test_slow_replay_yields_and_preserves_the_remainder(self):
+        pwsh=os.environ.get('PWSH_PATH') or shutil.which('pwsh')
+        with tempfile.TemporaryDirectory(prefix='watcher-slow-server-') as temp, socket.socket() as listener:
+            root=pathlib.Path(temp);spool=root/'spool';spool.mkdir();listener.bind(('127.0.0.1',0));listener.listen();listener.settimeout(20)
+            config={'agent_id':'slow-server','device_category':'windows_servers','collector_host':'localhost','collector_port':listener.getsockname()[1],
+                'spool_dir':str(spool),'log_file':str(root/'agent.log'),'poll_seconds':5,'heartbeat_seconds':60,'max_spool_events':50000,'send_batch_size':1000}
+            path=root/'agent.json';path.write_text(json.dumps(config));stamp='2026-11-01T00:00:00Z';delivered=[];errors=[]
+            for i in range(8):(spool/f'{i:04}.json').write_text(json.dumps({'EVENT_ID':str(uuid.uuid4()),'TIMESTAMP_UTC':stamp}))
+            def receive():
+                try:
+                    connection,_=listener.accept()
+                    with connection,connection.makefile('rb') as stream:
+                        while line:=stream.readline():
+                            row=json.loads(line)['event'];delivered.append(row);time.sleep(1.1);connection.sendall(('ACK '+row['EVENT_ID']+'\n').encode())
+                except Exception as error:errors.append(error)
+            worker=threading.Thread(target=receive);worker.start()
+            env={**os.environ,'XDG_CACHE_HOME':str(root/'cache'),'XDG_CONFIG_HOME':str(root/'config')}
+            result=subprocess.run([pwsh,'-NoLogo','-NoProfile','-File',str(ROOT/'tests/Test-ServerAgent.ps1'),'-AgentScript',str(ROOT/'ServerAgent/Watcher-ServerAgent.ps1'),'-ConfigPath',str(path),'-Mode','Send'],env=env,capture_output=True,text=True,timeout=30)
+            worker.join(timeout=5);self.assertFalse(worker.is_alive());self.assertEqual([],errors)
+            self.assertEqual(0,result.returncode,result.stdout+result.stderr);self.assertGreater(len(delivered),0);self.assertLess(len(delivered),8)
+            self.assertTrue(all(row['TIMESTAMP_UTC']==stamp for row in delivered));self.assertEqual(8-len(delivered),len(list(spool.glob('*.json'))))
+
     def test_delivery_and_offline_retry(self):
         pwsh=os.environ.get('PWSH_PATH') or shutil.which('pwsh')
         dotnet=os.environ.get('DOTNET_HOST_PATH') or shutil.which('dotnet')

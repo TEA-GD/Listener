@@ -155,3 +155,7 @@ The ServerAgent also reports complete TCP/UDP snapshots on each configured heart
 ## Device category
 
 Registration asks for the device category when no saved choice exists. For unattended deployment, add `-DeviceCategory windows_servers` (also accepts `linux_servers`, `user_pcs`, `project_stands`). Updates preserve the saved category unless explicitly overridden. Runtime configurations without the field continue as `legacy` for compatibility. Queued events keep their original category. Update the Collector first; see [device storage](../DEVICE-STORAGE.md).
+
+## Replaying offline data
+
+The ServerAgent retains unacknowledged spool files and retries when the Collector is reachable, preserving original UTC timestamps. Slow replay batches now yield between acknowledged events after roughly five seconds; the next collection iteration continues before another batch. In-flight connection/read timeouts still apply. The spool is bounded by `max_spool_events`; full capacity stops new collection rather than deleting unsent evidence. Delayed heartbeats appear orange after receipt in the updated Collector/GUI; see [timeline semantics](../Listener_DB_GUI/README.md#orange-working-periods-after-offline-replay).

@@ -268,3 +268,26 @@ Each device appears once. Its folder comes from its newest categorized event by 
 This is a GUI-only update. The category selection made in the agent installer already determines event storage; devices sending uncategorized events need that selection configured through Install / Update before they can move out of Unclassified. The GUI remains read-only and does not reassign database records or infer server roles from the OS. Old databases without category tables remain supported under Unclassified.
 
 Category lookup uses per-device/time indexes in the physical category tables and preserves the existing maintained device-list summaries. To deploy, rebuild/restart the GUI and reload the browser. No Collector schema migration is required for the folders.
+
+## Orange working periods after offline replay
+
+Agents already store unsent JSON events locally and retry them when the Collector becomes reachable. Original event timestamps and IDs survive replay. A file is removed only after the Collector durably commits it and acknowledges the matching event ID; repeated delivery is deduplicated.
+
+The online graph now distinguishes:
+
+- **Blue:** estimated working time with timely heartbeat reports.
+- **Orange:** estimated working time reconstructed from buffered/delayed heartbeats.
+- **Red:** no recent heartbeat evidence. This does not prove the device was powered off.
+- **Grey:** before the first retained report, or future time.
+
+Orange is retrospective: while a device cannot reach the Collector, the server cannot know whether it is still working. After replay, the chart fills the historical working periods and colors delayed ones orange. A heartbeat is delayed when `received_utc - TIMESTAMP_UTC` exceeds **120 seconds** by default. Set GUI configuration/environment `BufferedDeliverySeconds` (30–3600) to adjust the threshold. This is evidence of delayed delivery, not proof of a specific internet, VPN, corporate-network or Collector failure. Agent/server clocks should be synchronized; clock skew or Collector congestion can also create apparent delay. Delivery delays within the threshold do not turn orange.
+
+Working intervals still use the configured heartbeat grace period. Each late heartbeat covers its timestamp until the next heartbeat or grace expiry, whichever comes first. A timely following heartbeat switches the color back to blue. Sleep/shutdown/collection gaps without heartbeat evidence remain red. Replayed old heartbeats do not make a device online now. Duplicate stamps use the earliest recorded receipt time, so a replay of an on-time heartbeat does not make it orange.
+
+**Device working** totals include blue plus orange; the new **Working · reports delivered late** card shows the orange subset. Daily captions, hover/focus details, and the exact-period table expose the same distinction. Existing `total_online_seconds` remains total estimated working time for API compatibility; `total_buffered_seconds` and `total_connected_seconds` add the split.
+
+Deploy the updated **Collector first**, then the **GUI**, and reload the browser. The Collector backfills `gui_heartbeat_delivery` and schema marker 2 from retained event and receipt times in one transaction, preserving event tables, global IDs, categories and CSVs. Old records can be recolored if both timestamps are valid. Unparseable/missing receipt times do not establish delayed delivery. A new GUI also works with older Collector databases through raw-event queries, but updating the Collector provides indexed receipt history and avoids repeated raw-history scans.
+
+The updated compiled Agent and PowerShell ServerAgent also yield between acknowledged events when a slow replay batch has consumed about five seconds, allowing the collection loop to run again. Existing connect/read timeouts still apply to the in-flight event. Older agents' retained data is compatible with the orange graph; updating agents provides this replay responsiveness improvement.
+
+Buffering is finite: the compiled agent currently allows 50,000 pending events, and ServerAgent uses its configured `max_spool_events`. At capacity, new collection fails rather than discarding existing queued evidence; a missing period cannot be reconstructed without retained heartbeats. Keep the spool on persistent storage and size deployments for expected outage volume. The GUI cannot observe periods whose queued files were deleted or never collected.

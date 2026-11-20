@@ -317,6 +317,7 @@ internal static class Program
         var files = Directory.GetFiles(cfg.spool_dir, "*.json");
         Array.Sort(files, StringComparer.Ordinal);
         if (files.Length == 0) return 0;
+        var sendBudget=Stopwatch.StartNew();
         using var tcp = new TcpClient();
         tcp.ConnectAsync(cfg.collector_host, cfg.collector_port)
            .WaitAsync(TimeSpan.FromSeconds(8)).GetAwaiter().GetResult();
@@ -329,6 +330,8 @@ internal static class Program
         int sent = 0;
         foreach (var path in files.Take(CollectorSettings.SendBatchSize))
         {
+            // Yield to collection while draining a slow/offline backlog. Unsent files stay intact.
+            if(sent>0&&sendBudget.Elapsed>=TimeSpan.FromSeconds(5))break;
             byte[] body = File.ReadAllBytes(path);
             if (body.Length > 30000) throw new IOException($"Oversized event, retained: {path}");
             using var payload = JsonDocument.Parse(body);

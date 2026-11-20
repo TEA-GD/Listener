@@ -18,22 +18,40 @@ internal static class GuiReadModel
             SELECT COUNT(*) FROM gui_schema WHERE version=1;
             """;
         // ExecuteScalar returns the SELECT result after the schema statements.
-        if(Convert.ToInt64(c.ExecuteScalar())>0)return;
-        c.CommandText="""
-            DELETE FROM gui_devices; DELETE FROM gui_dimensions; DELETE FROM gui_heartbeats;
-            INSERT INTO gui_devices(host,events,lastEvent,lastReceived,processes,destinations)
-                SELECT MONITORED_HOST,COUNT(*),MAX(TIMESTAMP_UTC),MAX(received_utc),
-                    COUNT(DISTINCT NULLIF(PROCESS_NAME,'')),COUNT(DISTINCT NULLIF(RECIEVER_IP,''))
-                FROM events GROUP BY MONITORED_HOST;
-            INSERT INTO gui_dimensions SELECT DISTINCT MONITORED_HOST,'process',PROCESS_NAME FROM events WHERE PROCESS_NAME<>'';
-            INSERT INTO gui_dimensions SELECT DISTINCT MONITORED_HOST,'destination',RECIEVER_IP FROM events WHERE RECIEVER_IP<>'';
-            INSERT INTO gui_heartbeats
-                SELECT DISTINCT host,CAST(ROUND((julianday(TIMESTAMP_UTC)-2440587.5)*86400000) AS INTEGER)
-                FROM events WHERE EVENT_TYPE='HEARTBEAT' AND julianday(TIMESTAMP_UTC) IS NOT NULL;
-            UPDATE gui_devices SET heartbeat_revision=(SELECT COUNT(*) FROM gui_heartbeats h WHERE h.host=gui_devices.host);
-            INSERT INTO gui_schema VALUES(1);
-            """;
-        c.ExecuteNonQuery();
+        bool initialized=Convert.ToInt64(c.ExecuteScalar())>0;
+        if(!initialized){
+            c.CommandText="""
+                DELETE FROM gui_devices; DELETE FROM gui_dimensions; DELETE FROM gui_heartbeats;
+                INSERT INTO gui_devices(host,events,lastEvent,lastReceived,processes,destinations)
+                    SELECT MONITORED_HOST,COUNT(*),MAX(TIMESTAMP_UTC),MAX(received_utc),
+                        COUNT(DISTINCT NULLIF(PROCESS_NAME,'')),COUNT(DISTINCT NULLIF(RECIEVER_IP,''))
+                    FROM events GROUP BY MONITORED_HOST;
+                INSERT INTO gui_dimensions SELECT DISTINCT MONITORED_HOST,'process',PROCESS_NAME FROM events WHERE PROCESS_NAME<>'';
+                INSERT INTO gui_dimensions SELECT DISTINCT MONITORED_HOST,'destination',RECIEVER_IP FROM events WHERE RECIEVER_IP<>'';
+                INSERT INTO gui_heartbeats
+                    SELECT DISTINCT host,CAST(ROUND((julianday(TIMESTAMP_UTC)-2440587.5)*86400000) AS INTEGER)
+                    FROM events WHERE EVENT_TYPE='HEARTBEAT' AND julianday(TIMESTAMP_UTC) IS NOT NULL;
+                UPDATE gui_devices SET heartbeat_revision=(SELECT COUNT(*) FROM gui_heartbeats h WHERE h.host=gui_devices.host);
+                INSERT INTO gui_schema VALUES(1);
+                """;
+            c.ExecuteNonQuery();
+        }
+        // Version 2 retains receipt times without rewriting the event partitions or the v1 index.
+        c.CommandText="CREATE TABLE IF NOT EXISTS gui_heartbeat_delivery(host TEXT NOT NULL,stamp_ms INTEGER NOT NULL,received_ms INTEGER,PRIMARY KEY(host,stamp_ms)) WITHOUT ROWID; SELECT COUNT(*) FROM gui_schema WHERE version=2";
+        bool deliveryInitialized=Convert.ToInt64(c.ExecuteScalar())>0;
+        if(!initialized||!deliveryInitialized){
+            c.CommandText="""
+                DELETE FROM gui_schema WHERE version=2;
+                DELETE FROM gui_heartbeat_delivery;
+                INSERT INTO gui_heartbeat_delivery
+                    SELECT host,CAST(ROUND((julianday(TIMESTAMP_UTC)-2440587.5)*86400000) AS INTEGER),
+                        MIN(CAST(ROUND((julianday(received_utc)-2440587.5)*86400000) AS INTEGER))
+                    FROM events WHERE EVENT_TYPE='HEARTBEAT' AND julianday(TIMESTAMP_UTC) IS NOT NULL
+                    GROUP BY host,CAST(ROUND((julianday(TIMESTAMP_UTC)-2440587.5)*86400000) AS INTEGER);
+                INSERT INTO gui_schema VALUES(2);
+                """;
+            c.ExecuteNonQuery();
+        }
     }
 
     internal static void Store(SqliteConnection db,SqliteTransaction transaction,string host,string stamp,string received,string process,string destination,bool heartbeat)
@@ -47,6 +65,10 @@ internal static class GuiReadModel
             INSERT OR IGNORE INTO gui_dimensions SELECT $host,'destination',$destination WHERE $destination<>'';
             UPDATE gui_devices SET destinations=destinations+changes() WHERE host=$host;
             INSERT OR IGNORE INTO gui_heartbeats SELECT $host,CAST(ROUND((julianday($stamp)-2440587.5)*86400000) AS INTEGER) WHERE $heartbeat=1;
+            INSERT INTO gui_heartbeat_delivery
+                SELECT $host,CAST(ROUND((julianday($stamp)-2440587.5)*86400000) AS INTEGER),CAST(ROUND((julianday($received)-2440587.5)*86400000) AS INTEGER) WHERE $heartbeat=1
+                ON CONFLICT(host,stamp_ms) DO UPDATE SET received_ms=excluded.received_ms
+                WHERE gui_heartbeat_delivery.received_ms IS NULL OR excluded.received_ms<gui_heartbeat_delivery.received_ms;
             UPDATE gui_devices SET heartbeat_revision=heartbeat_revision+changes() WHERE host=$host;
             """;
         c.Parameters.AddWithValue("$host",host);c.Parameters.AddWithValue("$stamp",stamp);c.Parameters.AddWithValue("$received",received);
