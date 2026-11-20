@@ -13,6 +13,10 @@ if(mailViewToken.Length>0&&mailViewToken.Length<32)throw new ArgumentException("
 int onlineTimeout=int.TryParse(builder.Configuration["OnlineTimeoutSeconds"]??"120",out int configuredTimeout)?configuredTimeout:throw new ArgumentException("OnlineTimeoutSeconds must be an integer.");
 if(onlineTimeout<30||onlineTimeout>3600)throw new ArgumentException("OnlineTimeoutSeconds must be 30–3600.");
 builder.Services.AddSingleton(new DeviceAvailability(onlineTimeout));
+builder.Services.AddSingleton<IReverseNameLookup,ReverseNameLookup>();
+builder.Services.AddSingleton<ConnectionNames>(services=>new ConnectionNames(services.GetRequiredService<IReverseNameLookup>(),
+    builder.Configuration.GetValue("ResolveConnectionNames",true)));
+builder.Services.AddHostedService(services=>services.GetRequiredService<ConnectionNames>());
 var app = builder.Build();
 app.Use(async (context, next) => {
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -29,6 +33,13 @@ app.Use(async (context, next) => {
 });
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.MapGet("/api/connection-names",(HttpRequest request,ConnectionNames names)=>{
+    var inputs=request.Query["ip"];
+    if(inputs.Count is <1 or >100)throw new ArgumentException("Supply 1–100 IP addresses.");
+    var addresses=inputs.Select(value=>value is not null&&value.Length<=64&&System.Net.IPAddress.TryParse(value,out var address)?(Input:value,Address:address):
+        throw new ArgumentException("Invalid IP address.")).DistinctBy(pair=>pair.Input).ToArray();
+    return Results.Ok(new { names=addresses.ToDictionary(pair=>pair.Input,pair=>names.Request(pair.Address)) });
+});
 app.MapGet("/api/pcs", (ViewerDatabase database) => {
     using var db = database.Open();
     if(ViewerDatabase.HasReadModel(db))
@@ -120,7 +131,8 @@ app.MapGet("/api/connections", (HttpRequest request, ViewerDatabase database) =>
             SELECT RECIEVER_IP AS ip, MIN(julianday(TIMESTAMP_UTC)) AS firstSeen,
                 MAX(julianday(TIMESTAMP_UTC)) AS lastSeen, COUNT(*) AS observations,
                 group_concat(DISTINCT NULLIF(PORT_USED,'')) AS ports,
-                group_concat(DISTINCT NULLIF(PROCESS_NAME,'')) AS processes
+                group_concat(DISTINCT NULLIF(PROCESS_NAME,'')) AS processes,
+                group_concat(DISTINCT NULLIF(RECIEVER_DOMAINNAME,'')) AS reportedName
             FROM events
             WHERE host=$host AND date_utc=$day AND RECIEVER_IP<>''
               AND EVENT_TYPE IN ('TCP_CONNECTED','ACTIVE_AT_START','UDP_ENDPOINT_AT_START','UDP_ENDPOINT_OPENED') AND ($protocol='' OR PROTOCOL=$protocol)
@@ -151,7 +163,7 @@ app.MapGet("/api/connections", (HttpRequest request, ViewerDatabase database) =>
         SELECT ip,classification,strftime('%Y-%m-%dT%H:%M:%fZ',firstSeen) AS firstSeen,
             strftime('%Y-%m-%dT%H:%M:%fZ',lastSeen) AS lastSeen,
             strftime('%Y-%m-%dT%H:%M:%fZ',previousSeen) AS previousSeen,
-            round(firstSeen-previousSeen,2) AS gapDays,observations,ports,processes
+            round(firstSeen-previousSeen,2) AS gapDays,observations,ports,processes,reportedName
         FROM flagged ORDER BY classification,firstSeen,ip LIMIT $limit OFFSET $offset
         """, parameters);
     return Results.Ok(new { host, day, gapDays, page, size, summary, destinations });

@@ -45,8 +45,10 @@ async function refresh(){
         $('overviewTimes').textContent=`Last event: ${time(data.last_event_utc)} · Complete snapshot: ${time(data.snapshot_utc)} · Collector received: ${time(data.last_received_utc)}`;
         $('rateSummary').textContent=`${data.peak_tcp_per_minute} peak/min · ${data.average_tcp_per_minute} average/min`;
         chart(data);$('activeRows').replaceChildren();
-        for(const row of data.connections){const tr=make('tr');for(const value of [row.PROTOCOL,row.PROCESS_NAME||'Unknown',row.PROCESS_ID||'—',row.SOURCE_IP||'—',row.SOURCE_PORT||'—',row.RECIEVER_IP||'Peer not reported',row.PORT_USED||'—',row.RECIEVER_DOMAINNAME||'—',row.STATE||'—'])tr.append(make('td',value));$('activeRows').append(tr);}
-        if(!data.connections.length){const row=make('tr'),cell=make('td',data.status==='snapshot_required'?'This agent has not sent a complete snapshot yet.':'No connections in the latest reported state.');cell.colSpan=9;row.append(cell);$('activeRows').append(row);}
+        for(const row of data.connections){const tr=make('tr');
+            for(const value of [row.PROTOCOL,row.PROCESS_NAME||'Unknown',row.PROCESS_ID||'—',row.SOURCE_IP||'—'])tr.append(make('td',value));
+            tr.append(ListenerNames.source(row,host),make('td',row.SOURCE_PORT||'—'),make('td',row.RECIEVER_IP||'Peer not reported'),ListenerNames.destination(row),make('td',row.PORT_USED||'—'),make('td',row.STATE||'—'));$('activeRows').append(tr);}
+        if(!data.connections.length){const row=make('tr'),cell=make('td',data.status==='snapshot_required'?'This agent has not sent a complete snapshot yet.':'No connections in the latest reported state.');cell.colSpan=10;row.append(cell);$('activeRows').append(row);}
         $('activePage').textContent=`${total} reported connections · Page ${page} of ${Math.max(1,Math.ceil(total/50))}`;
         $('activePrev').disabled=page===1;$('activeNext').disabled=page*50>=total;
     }catch(e){if(e.name!=='AbortError'){$('overviewStatus').textContent='Overview unavailable: '+e.message;$('overviewStatus').className='report-state stale';$('deviceIPs').className='device-ip-unknown';$('deviceOnlineStatus').textContent='Availability could not be refreshed';}}

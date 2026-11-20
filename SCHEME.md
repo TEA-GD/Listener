@@ -261,3 +261,7 @@ Agents tag events with the device type selected during installation. The Collect
 ## GUI read performance
 
 The Collector maintains derived `gui_*` tables in the event transaction. The read-only GUI uses device summaries and indexed heartbeat stamps, caches sessions until heartbeat data changes, and initially scopes history to the latest recorded UTC day. The connection comparison report is loaded on request. See [performance deployment and measurements](Listener_DB_GUI/PERFORMANCE.md).
+
+## Connection-name annotations
+
+The GUI displays agent-reported source/destination names from existing event fields. Missing source names use the monitored device identity; missing peer names use bounded background reverse DNS on the GUI server, with caching and timeouts. Current DNS annotations do not change stored events or frozen capture data. See [GUI connection names](Listener_DB_GUI/README.md#connection-names).

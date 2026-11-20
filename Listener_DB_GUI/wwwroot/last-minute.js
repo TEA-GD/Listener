@@ -40,11 +40,12 @@ async function capture(fresh=true){
         $('minuteIPs').textContent=data.device_ips.join(', ')||'No routed local IP reported';$('minutePeer').textContent='Collector sees: '+(data.collector_peer_ip||'unavailable');
         $('minuteRows').replaceChildren();
         for(const row of data.connections){
-            const tr=make('tr');for(const value of [row.PROTOCOL||'—',row.PROCESS_NAME||'Unknown',row.PROCESS_ID||'—',row.SOURCE_IP||'—',row.SOURCE_PORT||'—',row.RECIEVER_IP||'Peer not reported',row.PORT_USED||'—'])tr.append(make('td',value));
+            const tr=make('tr');for(const value of [row.PROTOCOL||'—',row.PROCESS_NAME||'Unknown',row.PROCESS_ID||'—',row.SOURCE_IP||'—'])tr.append(make('td',value));
+            tr.append(ListenerNames.source(row,host),make('td',row.SOURCE_PORT||'—'),make('td',row.RECIEVER_IP||'Peer not reported'),ListenerNames.destination(row),make('td',row.PORT_USED||'—'));
             const state=make('td');const tag=make('span',row.window_status);tag.className='tag '+(row.present_at_latest?'new-connection':'returned-connection');state.append(tag);tr.append(state);
             tr.append(make('td',stamp(row.last_observed_utc)));$('minuteRows').append(tr);
         }
-        if(!data.connections.length){const tr=make('tr'),td=make('td','No connections were reported for this device in the captured minute. Missing reports do not prove the device was idle.');td.colSpan=9;tr.append(td);$('minuteRows').append(tr);}
+        if(!data.connections.length){const tr=make('tr'),td=make('td','No connections were reported for this device in the captured minute. Missing reports do not prove the device was idle.');td.colSpan=11;tr.append(td);$('minuteRows').append(tr);}
         $('minutePage').textContent=`${total} unique connections · Page ${page} of ${Math.max(1,Math.ceil(total/data.size))}`;
         $('minutePrev').disabled=page===1;$('minuteNext').disabled=page*data.size>=total;
     }catch(e){if(e.name!=='AbortError'){$('minuteStatus').textContent='Capture unavailable: '+e.message;$('minuteStatus').className='report-state stale';if(fresh){$('minuteRows').replaceChildren();$('minuteTimes').textContent='No new frame captured.';}}}

@@ -246,3 +246,15 @@ Changing it recalculates the estimate from retained heartbeats. No availability 
 ## Faster device views
 
 Update the Collector and GUI together to use maintained device summaries, indexed heartbeat history and cached online sessions. Initial history shows the latest recorded UTC day; clear the dates or use Reset for all retained history. The new/returning destination report runs on **Check connections**. See [deployment steps, benchmarks and limitations](PERFORMANCE.md).
+
+## Connection names
+
+History, current connections and Last minute captures now include **Source name** and **Destination name** columns alongside the IPs. The new/returning destination report includes **Source device** and **Destination name**. Source/local identifies the monitored device and peer/destination identifies its remote endpoint; these labels do not establish which side initiated a connection.
+
+Names already reported in `SOURCE_DOMAIN_NAME` and `RECIEVER_DOMAINNAME` take priority. Missing source names fall back to the monitored device ID. Missing destination names are looked up through the GUI server's configured DNS resolver, separately from the data requests. AD device names therefore depend on correct internal reverse-DNS/PTR records and the server using the appropriate DNS servers. A PTR name may describe a provider/server rather than the actual website; some IPs have no PTR record and stay `—`.
+
+Lookup uses four workers, a 256-item queue, one-second lookup timeouts and a cache limited to 4,096 addresses (10 minutes for names, one minute for unavailable results). The browser batches visible table rows, caches results, and bounds retries. Wildcard/multicast addresses are not queried; loopback displays `localhost`. To disable DNS queries, set the GUI process environment variable `ResolveConnectionNames=false`; reported names still display.
+
+Reverse-DNS names are current annotations, including on historical/frozen captures; they do not modify the event, database, CSV exports or recorded capture timestamps. Names render as plain text. Rebuild/redeploy the GUI and reload the browser; Collector and agents need no changes for this feature.
+
+Validation: build the GUI, run `dotnet run --project tests/ConnectionNames -c Release`, then `python -m unittest discover -s tests -p 'test_connection_names.py'`. The worker tests use a fake DNS resolver, and browser tests use deterministic name responses.
