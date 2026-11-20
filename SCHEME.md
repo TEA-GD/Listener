@@ -269,3 +269,7 @@ The GUI displays agent-reported source/destination names from existing event fie
 ## Windows agent task and notebook power
 
 The compiled-agent installer creates/replaces an explicit SYSTEM startup task that permits battery startup and unplugging, has no execution time limit, and retries failures. Apply the policy to older installations using **Install / Update** in the rebuilt installer. Configuration and queued events are preserved. The separate PowerShell ServerAgent already uses equivalent battery/runtime settings. See [notebook deployment and verification](Agent/README.md#notebooks-run-on-battery-power).
+
+## Device-folder navigation
+
+The GUI sidebar groups devices into Win Server, Linux Server, User PCs and Project Stand, using the newest categorized event for each device (event-time order, global sequence to break ties). Legacy-only devices appear in Unclassified. Folder navigation does not move historical records or split a device's combined history. See [device folders](Listener_DB_GUI/README.md#device-folders).

@@ -258,3 +258,13 @@ Lookup uses four workers, a 256-item queue, one-second lookup timeouts and a cac
 Reverse-DNS names are current annotations, including on historical/frozen captures; they do not modify the event, database, CSV exports or recorded capture timestamps. Names render as plain text. Rebuild/redeploy the GUI and reload the browser; Collector and agents need no changes for this feature.
 
 Validation: build the GUI, run `dotnet run --project tests/ConnectionNames -c Release`, then `python -m unittest discover -s tests -p 'test_connection_names.py'`. The worker tests use a fake DNS resolver, and browser tests use deterministic name responses.
+
+## Device folders
+
+The left menu has expandable **Win Server**, **Linux Server**, **User PCs**, and **Project Stand** folders, each with a device count. Click a folder to open/close it, then choose a device to view its existing overview, history or Last minute capture. Search finds devices across all folders and expands matching groups. Folder expansion is retained during page refreshes through the Refresh data button; a full browser reload resets it.
+
+Each device appears once. Its folder comes from its newest categorized event by agent event time; equal timestamps use the global event sequence. Uncategorized/legacy reports do not override a known category. Historical records in other categories remain part of the same device history. Devices with no categorized records are shown in **Unclassified**, which is expanded initially. Empty standard folders stay available with count zero.
+
+This is a GUI-only update. The category selection made in the agent installer already determines event storage; devices sending uncategorized events need that selection configured through Install / Update before they can move out of Unclassified. The GUI remains read-only and does not reassign database records or infer server roles from the OS. Old databases without category tables remain supported under Unclassified.
+
+Category lookup uses per-device/time indexes in the physical category tables and preserves the existing maintained device-list summaries. To deploy, rebuild/restart the GUI and reload the browser. No Collector schema migration is required for the folders.

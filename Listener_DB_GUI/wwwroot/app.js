@@ -8,8 +8,34 @@ function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefine
 function timestamp(value){if(!value)return '—';const d=new Date(value);return Number.isNaN(d.getTime())?value:d.toISOString().replace('T',' ').replace('Z',' UTC');}
 function error(message){$('error').textContent=message;$('error').hidden=!message;}
 async function api(path,signal){const r=await fetch(path,{signal});const data=await r.json();if(!r.ok)throw new Error(data.error||'Request failed.');return data;}
-function drawPCs(){const filter=$('pcSearch').value.toLowerCase();$('pcs').replaceChildren();$('pcCount').textContent=computers.length;for(const pc of computers.filter(p=>p.host.toLowerCase().includes(filter))){const b=el('button',undefined,'pc'+(pc.host===host?' selected':''));b.setAttribute('aria-pressed',String(pc.host===host));b.append(el('strong',pc.host),el('span',`${Number(pc.events).toLocaleString()} events · ${pc.processes} processes`),el('span',`Received: ${timestamp(pc.lastReceived)}`));b.onclick=()=>{host=pc.host;page=1;connectionPage=1;$('connectionDay').value=(pc.lastEvent||new Date().toISOString()).slice(0,10);if(historyDateDefault){$('from').value=$('to').value=(pc.lastEvent||new Date().toISOString()).slice(0,10);}resetConnectionReport();drawPCs();ListenerTabs.selectHost(host);ListenerOverview.select(host);if(ListenerTabs.active()==='overview')loadDetail();};$('pcs').append(b);}if(!$('pcs').children.length)$('pcs').append(el('p',computers.length?'No matching PCs.':'No collected events yet. Check the collector service and agent delivery.'));}
-async function loadPCs(){listRequest?.abort();const request=new AbortController();listRequest=request;try{computers=await api('/api/pcs',request.signal);drawPCs();error('');if(host&&computers.some(p=>p.host===host)){if(ListenerTabs.active()==='overview')await Promise.all([loadDetail(),ListenerOverview.refresh()]);}else{host=null;ListenerTabs.clear();ListenerOverview.clear();$('detail').hidden=true;$('empty').hidden=ListenerTabs.active()!=='overview';$('title').textContent='Choose a computer';}}catch(e){if(e.name!=='AbortError')error(e.message);}}
+const deviceFolders=[['windows_servers','Win Server'],['linux_servers','Linux Server'],['user_pcs','User PCs'],['project_stands','Project Stand'],['legacy','Unclassified']];
+const openFolders=new Set(['legacy']);
+function deviceCategory(pc){return deviceFolders.some(([key])=>key===pc.category)?pc.category:'legacy';}
+function drawPCs(){
+    const filter=$('pcSearch').value.toLowerCase();$('pcs').replaceChildren();$('pcCount').textContent=computers.length;
+    let matching=0;
+    for(const [category,label] of deviceFolders){
+        const members=computers.filter(pc=>deviceCategory(pc)===category);
+        if(category==='legacy'&&!members.length)continue;
+        const shown=members.filter(pc=>pc.host.toLowerCase().includes(filter));matching+=shown.length;
+        const folder=el('details',undefined,'device-folder'+(members.some(pc=>pc.host===host)?' selected-folder':''));folder.dataset.category=category;
+        folder.open=filter.length>0?shown.length>0:openFolders.has(category);
+        folder.addEventListener('toggle',()=>{if(!filter){if(folder.open)openFolders.add(category);else openFolders.delete(category);}});
+        const summary=el('summary');summary.setAttribute('aria-label',label+', '+shown.length+' devices');
+        const icon=el('span',undefined,'device-folder-icon');icon.setAttribute('aria-hidden','true');
+        summary.append(icon,el('span',label,'device-folder-name'),el('span',filter?shown.length+' / '+members.length:String(members.length),'device-folder-count'));
+        const items=el('div',undefined,'device-folder-items');
+        for(const pc of shown){
+            const b=el('button',undefined,'pc'+(pc.host===host?' selected':''));b.setAttribute('aria-pressed',String(pc.host===host));b.append(el('strong',pc.host),el('span',`${Number(pc.events).toLocaleString()} events · ${pc.processes} processes`),el('span',`Received: ${timestamp(pc.lastReceived)}`));b.onclick=()=>{host=pc.host;page=1;connectionPage=1;$('connectionDay').value=(pc.lastEvent||new Date().toISOString()).slice(0,10);if(historyDateDefault){$('from').value=$('to').value=(pc.lastEvent||new Date().toISOString()).slice(0,10);}openFolders.add(category);resetConnectionReport();drawPCs();ListenerTabs.selectHost(host);ListenerOverview.select(host);if(ListenerTabs.active()==='overview')loadDetail();};
+            items.append(b);
+        }
+        if(!shown.length)items.append(el('p',filter?'No matching devices.':'No devices in this category yet.','device-folder-empty'));
+        folder.append(summary,items);$('pcs').append(folder);
+    }
+    if(!computers.length)$('pcs').append(el('p','No collected events yet. Check the collector service and agent delivery.'));
+    else if(!matching)$('pcs').append(el('p','No matching PCs.'));
+}
+async function loadPCs(){listRequest?.abort();const request=new AbortController();listRequest=request;try{computers=await api('/api/pcs',request.signal);const selected=computers.find(pc=>pc.host===host);if(selected)openFolders.add(deviceCategory(selected));drawPCs();error('');if(host&&computers.some(p=>p.host===host)){if(ListenerTabs.active()==='overview')await Promise.all([loadDetail(),ListenerOverview.refresh()]);}else{host=null;ListenerTabs.clear();ListenerOverview.clear();$('detail').hidden=true;$('empty').hidden=ListenerTabs.active()!=='overview';$('title').textContent='Choose a computer';}}catch(e){if(e.name!=='AbortError')error(e.message);}}
 async function loadDetail(){if(!host||ListenerTabs.active()!=='overview')return;detailRequest?.abort();const request=new AbortController();detailRequest=request;$('detail').hidden=ListenerTabs.active()!=='overview';$('empty').hidden=true;$('title').textContent=host;$('subtitle').textContent='Loading collected events…';$('events').replaceChildren();$('stats').replaceChildren();$('groups').replaceChildren();$('prev').disabled=$('next').disabled=true;
 const p=new URLSearchParams({host,page,size,q:$('query').value,type:$('type').value,from:$('from').value,to:$('to').value,destination:$('destination').value,protocol:$('protocol').value});
 try{const d=await api('/api/pc?'+p,request.signal);error('');total=Number(d.stats.events);$('subtitle').textContent=`Last event: ${timestamp(d.stats.lastEvent)} · All times in UTC`;$('updated').textContent='Updated '+new Date().toLocaleTimeString();

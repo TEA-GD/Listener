@@ -42,15 +42,17 @@ app.MapGet("/api/connection-names",(HttpRequest request,ConnectionNames names)=>
 });
 app.MapGet("/api/pcs", (ViewerDatabase database) => {
     using var db = database.Open();
-    if(ViewerDatabase.HasReadModel(db))
-        return Results.Ok(ViewerDatabase.Query(db,"SELECT host,events,lastEvent,lastReceived,processes,destinations FROM gui_devices ORDER BY lastReceived DESC,host"));
-    return Results.Ok(ViewerDatabase.Query(db, """
+    var devices=ViewerDatabase.HasReadModel(db)
+        ?ViewerDatabase.Query(db,"SELECT host,events,lastEvent,lastReceived,processes,destinations FROM gui_devices ORDER BY lastReceived DESC,host")
+        :ViewerDatabase.Query(db, """
         SELECT MONITORED_HOST AS host, COUNT(*) AS events,
           MAX(TIMESTAMP_UTC) AS lastEvent, MAX(received_utc) AS lastReceived,
           COUNT(DISTINCT NULLIF(PROCESS_NAME,'')) AS processes,
           COUNT(DISTINCT NULLIF(RECIEVER_IP,'')) AS destinations
         FROM events GROUP BY MONITORED_HOST ORDER BY lastReceived DESC,host
-        """));
+        """);
+    DeviceFolders.Attach(db,devices);
+    return Results.Ok(devices);
 });
 app.MapGet("/api/last-minute",(HttpRequest request,ViewerDatabase database)=>LastMinuteSnapshot.Read(request,database));
 app.MapGet("/api/device-overview",(HttpRequest request,ViewerDatabase database,DeviceAvailability availability)=>
