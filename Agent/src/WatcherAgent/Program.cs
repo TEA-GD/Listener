@@ -327,27 +327,32 @@ internal static class Program
         network.ReadTimeout = 10000;
         network.WriteTimeout = 10000;
         using var reader = new StreamReader(network, Encoding.ASCII, false, 1024, leaveOpen: true);
-        int sent = 0;
-        foreach (var path in files.Take(CollectorSettings.SendBatchSize))
-        {
-            // Yield to collection while draining a slow/offline backlog. Unsent files stay intact.
+        tcp.NoDelay=true;
+        int sent=0,index=0,window=1;
+        var pending=files.Take(CollectorSettings.SendBatchSize).ToArray();
+        byte[] Encode(string path,bool negotiate,out string id){
+            byte[] body=File.ReadAllBytes(path);
+            if(body.Length>30000)throw new IOException($"Oversized event, retained: {path}");
+            using var payload=JsonDocument.Parse(body);id=payload.RootElement.GetProperty("EVENT_ID").GetString()!;
+            byte[] bytes=negotiate?JsonSerializer.SerializeToUtf8Bytes(new { @event=payload.RootElement,request_pipeline=true }):JsonSerializer.SerializeToUtf8Bytes(new { @event=payload.RootElement });
+            if(bytes.Length+1>32768)throw new IOException("Envelope too large; event retained");return bytes;
+        }
+        while(index<pending.Length){
             if(sent>0&&sendBudget.Elapsed>=TimeSpan.FromSeconds(5))break;
-            byte[] body = File.ReadAllBytes(path);
-            if (body.Length > 30000) throw new IOException($"Oversized event, retained: {path}");
-            using var payload = JsonDocument.Parse(body);
-            string eventId = payload.RootElement.GetProperty("EVENT_ID").GetString()!;
-            byte[] request = JsonSerializer.SerializeToUtf8Bytes(new
-            {
-                @event = payload.RootElement
-            });
-            if (request.Length + 1 > 32768) throw new IOException("Envelope too large; event retained");
-            network.Write(request);
-            network.WriteByte((byte)'\n');
-            network.Flush();
-            string? ack = reader.ReadLine();
-            if (ack != "ACK " + eventId) throw new IOException("Collector did not acknowledge event: " + ack);
-            File.Delete(path);
-            sent++;
+            var group=new List<(string Path,string Id,byte[] Body)>();int bytes=0;
+            while(index<pending.Length&&group.Count<window){
+                byte[] body=Encode(pending[index],index==0,out string id);
+                if(group.Count>0&&bytes+body.Length+1>131072)break;
+                group.Add((pending[index],id,body));bytes+=body.Length+1;index++;
+            }
+            // Write the bounded group before waiting; ACKs remain ordered and per event.
+            foreach(var item in group){network.Write(item.Body);network.WriteByte((byte)'\n');}network.Flush();
+            foreach(var item in group){
+                string? ack=reader.ReadLine();
+                if(sent==0&&ack=="ACK "+item.Id+" PIPELINE64")window=64;
+                else if(ack!="ACK "+item.Id)throw new IOException("Collector did not acknowledge event: "+ack);
+                File.Delete(item.Path);sent++;
+            }
         }
         return sent;
     }

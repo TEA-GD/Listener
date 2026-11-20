@@ -29,9 +29,9 @@ class Verify(unittest.TestCase):
         self.assertEqual([], conf['allowed_client_cidrs'])
 
     def test_ack_protocol(self):
-        self.assertIn('"ACK " + id + "\\n"', self.collector)
-        self.assertIn('"ACK " + eventId', self.agent)
-        self.assertIn('File.Delete(path);', self.agent)
+        self.assertIn('"ACK " + id', self.collector)
+        self.assertIn('"ACK "+item.Id', self.agent)
+        self.assertIn('File.Delete(item.Path);', self.agent)
         self.assertIn('transaction.Commit();', self.collector)
         self.assertLess(self.collector.find('transaction.Commit();'), self.collector.find('return eventId;'))
         self.assertIn('ON CONFLICT(event_id) DO NOTHING', self.collector)

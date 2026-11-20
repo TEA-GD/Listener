@@ -49,7 +49,46 @@ internal static class AgentIntegration
         Check(empty.Count==1&&empty[0]["STATE"]=="SNAPSHOT_COMPLETE:0","Empty state must reset prior sockets");
         foreach (bool acknowledge in new[] { true, false }) await TestDelivery(acknowledge);
         await TestSlowBacklog();
+        await TestPipeline(false);
+        await TestPipeline(true);
+        await TestPipeline(false,true);
         Console.WriteLine("PASS: hostname configuration, legacy defaults, validation, DNS TCP delivery, ACK deletion and failed-ACK retention");
+    }
+
+    private static async Task TestPipeline(bool reject,bool large=false)
+    {
+        string root=Path.Combine(Path.GetTempPath(),"watcher-pipeline-"+Guid.NewGuid());Directory.CreateDirectory(root);
+        var listener=new TcpListener(IPAddress.Loopback,0);listener.Start();
+        var ids=Enumerable.Range(0,130).Select(_=>Guid.NewGuid().ToString()).ToArray();
+        try{
+            string padding=new string('x',large?20000:0);
+            int encodedSize=JsonSerializer.SerializeToUtf8Bytes(new { @event=new { EVENT_ID=ids[0],TIMESTAMP_UTC="2026-11-01T00:00:00Z",padding } }).Length+1;
+            for(int i=0;i<ids.Length;i++)File.WriteAllText(Path.Combine(root,i.ToString("D4")+".json"),JsonSerializer.Serialize(new{EVENT_ID=ids[i],TIMESTAMP_UTC="2026-11-01T00:00:00Z",padding}));
+            var server=Task.Run(async()=>{
+                using var client=await listener.AcceptTcpClientAsync();using var stream=client.GetStream();using var reader=new StreamReader(stream);
+                using(var first=JsonDocument.Parse((await reader.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5)))!))Check(first.RootElement.GetProperty("request_pipeline").GetBoolean(),"Negotiation missing");
+                await stream.WriteAsync(Encoding.ASCII.GetBytes("ACK "+ids[0]+" PIPELINE64\n"));
+                int at=1;
+                while(at<ids.Length){
+                    int count=Math.Min(Math.Min(64,131072/encodedSize),ids.Length-at);
+                    for(int n=0;n<count;n++){
+                        using var row=JsonDocument.Parse((await reader.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5)))!);
+                        Check(row.RootElement.GetProperty("event").GetProperty("EVENT_ID").GetString()==ids[at+n],"Pipeline changed FIFO order");
+                        Check(row.RootElement.GetProperty("event").GetProperty("TIMESTAMP_UTC").GetString()=="2026-11-01T00:00:00Z","Replay timestamp changed");
+                    }
+                    // All requests must arrive BEFORE this group's acknowledgments.
+                    await Task.Delay(100);
+                    if(reject){await stream.WriteAsync(Encoding.ASCII.GetBytes(string.Concat(ids.Skip(at).Take(10).Select(id=>"ACK "+id+"\n"))+"ERR rejected event\n"));return;}
+                    await stream.WriteAsync(Encoding.ASCII.GetBytes(string.Concat(ids.Skip(at).Take(count).Select(id=>"ACK "+id+"\n"))));at+=count;
+                }
+            });
+            var config=new AgentConfig{collector_host="localhost",collector_port=((IPEndPoint)listener.LocalEndpoint).Port,spool_dir=root};bool failed=false;
+            try{int sent=await Task.Run(()=>(int)typeof(WatcherAgent.Program).GetMethod("SendQueuedEvents",BindingFlags.NonPublic|BindingFlags.Static)!.Invoke(null,new object[]{config})!);Check(sent==130,"Not all pipeline records delivered");}
+            catch(TargetInvocationException error) when(error.InnerException is IOException){failed=true;}
+            await server;Check(failed==reject,"Pipeline rejection incorrectly reported");
+            Check(Directory.GetFiles(root,"*.json").Length==(reject?119:0),"Missing ACK deleted pending files or matching ACK not removed");
+        }
+        finally{listener.Stop();Directory.Delete(root,true);}
     }
 
     private static async Task TestSlowBacklog()

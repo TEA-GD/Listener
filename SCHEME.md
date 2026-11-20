@@ -285,3 +285,7 @@ Agents send `NETWORK_CONTEXT`, `PROCESS_CONTEXT` and a final `CONTEXT_COMPLETE` 
 ## Daily timeline UI
 
 The GUI defaults to three days with configurable rows per page and a selected date range. Each daily activity graph includes a timezone-aligned network-sample strip, using bounded two-minute estimates rather than carrying stale adapter state across gaps. Range totals include all selected dates. A device-specific empty analysis destination is linked beside the graph button. This is a GUI-only change; see [timeline navigation](Listener_DB_GUI/README.md#daily-timeline-navigation-and-network-strips).
+
+## VPN upload pipelining
+
+The first event may include `request_pipeline: true`. Only after durable storage does an updated Collector respond with `ACK <id> PIPELINE64`. Agents then send at most 64 events or 128 KiB in flight, using the existing per-event ACKs for file deletion. Legacy peers retain sequential behavior. Collector read-ahead and ACK writes use separate stream paths to support queued input safely. No database schema change is needed. See [deployment and backlog verification](Agent/README.md#vpn-backlog-pipelined-delivery).

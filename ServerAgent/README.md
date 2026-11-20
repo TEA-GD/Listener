@@ -163,3 +163,7 @@ The ServerAgent retains unacknowledged spool files and retries when the Collecto
 ## Network/process context
 
 Registration copies `Shared/NetworkContext.ps1` beside the installed agent. Each heartbeat samples active adapters and running processes/services and sends context events through the existing spool. Update the Collector first, then re-register this agent from the complete repository layout. See [network context fields and limitations](../Listener_DB_GUI/README.md#device-network-communications-and-running-processes).
+
+## Pipelined VPN delivery
+
+The updated ServerAgent negotiates pipeline support on its first ordinary event, then sends groups of up to 64 events/128 KiB before reading per-event durable ACKs. Legacy Collectors receive sequential traffic automatically; old timestamps and unacknowledged files are preserved. Update the Collector first, then re-register the updated ServerAgent while retaining its spool. Existing five-second replay yielding and configurable `send_batch_size` limits remain. See [VPN backlog behavior](../Agent/README.md#vpn-backlog-pipelined-delivery).

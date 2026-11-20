@@ -60,3 +60,13 @@ Unacknowledged events stay in the local spool across Collector/network outages a
 ## Minute network/process context
 
 Each heartbeat also samples active network adapters and running processes/services, correlating them by device and snapshot ID. Deploy the updated Collector before this agent. Windows embeds the shared metadata-only PowerShell sampler; Linux uses interface/process metadata and optional NetworkManager/systemd labels. See [fields, limits, privacy and GUI deployment](../Listener_DB_GUI/README.md#device-network-communications-and-running-processes). Context shares the existing finite spool and ACK delivery, increasing disk/database volume.
+
+## VPN backlog: pipelined delivery
+
+Update the Collector first, then rebuild/update the agent using **Install / Update**. Keep the existing spool and configuration. Updating only the agent is safe, but an older Collector keeps the sequential delivery speed.
+
+The first ordinary event requests pipeline support. An updated Collector acknowledges that committed event with `ACK <event-id> PIPELINE64`; subsequent groups can contain up to 64 events or 128 KiB of encoded data. All events retain their original timestamps and IDs. Each file is deleted only after its own matching durable ACK. Rejection/disconnection leaves unacknowledged files for replay; duplicates remain idempotent. Existing Collectors simply return the original ACK, which makes the new agent use sequential delivery. Old agents never request the extension and continue receiving unchanged ACKs.
+
+The sender still limits each pass to 1,000 files and yields to collection after roughly five seconds between groups; the current group can take longer according to existing timeouts. This removes the one-network-round-trip-per-record bottleneck on VPNs without suspending monitoring to drain the entire backlog. Network/process snapshot cadence and contents are preserved.
+
+After upgrading, check the pending count several times over a few minutes. Expect brief increases when minute snapshots are queued, with an overall downward trend while catching up. Actual throughput still depends on VPN bandwidth, Collector disk/commit speed and event production. Do not delete queued files or reinstall to clear the backlog. The 50,000-event spool limit remains in effect.

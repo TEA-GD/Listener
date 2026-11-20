@@ -140,24 +140,28 @@ function Send-Spool($Config) {
         if (-not $connect.Wait(8000)) { throw 'Collector connect timeout' }
         $connect.GetAwaiter().GetResult() | Out-Null
         $stream = $client.GetStream(); $stream.ReadTimeout=10000; $stream.WriteTimeout=10000
-        $sent = 0
-        foreach ($file in $files) {
-            if ($sent -gt 0 -and $sendBudget.Elapsed.TotalSeconds -ge 5) { break }
-            $raw = [IO.File]::ReadAllText($file.FullName)
-            $body = $raw | ConvertFrom-Json
-            $id = [string]$body.EVENT_ID
-            # ConvertFrom-Json may turn UTC strings into local DateTime values in
-            # PowerShell 7. Preserve the original JSON instead of reserializing it.
-            # Remove formatting newlines so the envelope remains one protocol line;
-            # escaped \r/\n inside JSON strings remain unchanged.
-            $request = '{"event":' + $raw.Replace("`r",'').Replace("`n",'') + '}'
-            $bytes = [Text.Encoding]::UTF8.GetBytes($request + "`n")
-            if ($bytes.Length -gt 32768) { throw "Oversized event retained: $($file.Name)" }
-            $stream.Write($bytes,0,$bytes.Length); $stream.Flush()
-            $ack = Read-CollectorAck $stream
-            if ($ack -cne ('ACK ' + $id)) { throw "Collector rejected event: $ack" }
-            [IO.File]::Delete($file.FullName)
-            $sent++
+        $client.NoDelay=$true
+        $sent=0; $index=0; $window=1
+        while($index -lt $files.Count){
+            if($sent -gt 0 -and $sendBudget.Elapsed.TotalSeconds -ge 5){break}
+            $group=@();$size=0
+            while($index -lt $files.Count -and $group.Count -lt $window){
+                $file=$files[$index];$raw=[IO.File]::ReadAllText($file.FullName);$body=$raw | ConvertFrom-Json;$id=[string]$body.EVENT_ID
+                # Preserve the original JSON and timestamps; never reserialize parsed dates.
+                $request='{"event":'+$raw.Replace("`r",'').Replace("`n",'')
+                if($index -eq 0){$request+=',"request_pipeline":true'}
+                $request+='}';$bytes=[Text.Encoding]::UTF8.GetBytes($request+"`n")
+                if($bytes.Length -gt 32768){throw "Oversized event retained: $($file.Name)"}
+                if($group.Count -gt 0 -and $size+$bytes.Length -gt 131072){break}
+                $group+=@{File=$file;Id=$id;Bytes=$bytes};$size+=$bytes.Length;$index++
+            }
+            foreach($item in $group){$stream.Write($item.Bytes,0,$item.Bytes.Length)};$stream.Flush()
+            foreach($item in $group){
+                $ack=Read-CollectorAck $stream
+                if($sent -eq 0 -and $ack -ceq ('ACK '+$item.Id+' PIPELINE64')){$window=64}
+                elseif($ack -cne ('ACK '+$item.Id)){throw "Collector rejected event: $ack"}
+                [IO.File]::Delete($item.File.FullName);$sent++
+            }
         }
         return $sent
     } finally { $client.Dispose() }

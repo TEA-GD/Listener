@@ -228,11 +228,14 @@ internal sealed class CollectorWorker(CollectorConfig cfg) : BackgroundService
         {
             using (client)
             {
+                client.NoDelay = true;
                 client.ReceiveTimeout = 20000;
                 client.SendTimeout = 20000;
                 using var stream = client.GetStream();
                 stream.ReadTimeout = 20000;
                 stream.WriteTimeout = 20000;
+                // Read-ahead only: writing ACKs through the same BufferedStream would
+                // require seeking over unread pipelined input on a non-seekable socket.
                 using var buffered = new BufferedStream(stream, 65536);
                 while (true)
                 {
@@ -240,8 +243,8 @@ internal sealed class CollectorWorker(CollectorConfig cfg) : BackgroundService
                     try { message = ReadLineBounded(buffered); }
                     catch (InvalidDataException)
                     {
-                        buffered.Write(Encoding.ASCII.GetBytes("ERR invalid message length\n"));
-                        buffered.Flush();
+                        stream.Write(Encoding.ASCII.GetBytes("ERR invalid message length\n"));
+                        stream.Flush();
                         break;
                     }
                     if (message is null) break;
@@ -249,15 +252,16 @@ internal sealed class CollectorWorker(CollectorConfig cfg) : BackgroundService
                     {
                         using var doc = JsonDocument.Parse(message);
                         string id = Database.Store(database, doc.RootElement, peerIp);
-                        byte[] ack = Encoding.ASCII.GetBytes("ACK " + id + "\n");
-                        buffered.Write(ack);
-                        buffered.Flush();
+                        bool pipeline=doc.RootElement.TryGetProperty("request_pipeline",out var requested)&&requested.ValueKind==JsonValueKind.True;
+                        byte[] ack = Encoding.ASCII.GetBytes("ACK " + id + (pipeline?" PIPELINE64":"") + "\n");
+                        stream.Write(ack);
+                        stream.Flush();
                     }
                     catch (Exception ex) when (ex is JsonException or ArgumentException or FormatException or InvalidOperationException)
                     {
                         Log.Write($"REJECTED {peerIp}: {ex.Message}");
-                        buffered.Write(Encoding.ASCII.GetBytes("ERR rejected event\n"));
-                        buffered.Flush();
+                        stream.Write(Encoding.ASCII.GetBytes("ERR rejected event\n"));
+                        stream.Flush();
                         break;
                     }
                 }
