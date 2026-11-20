@@ -115,7 +115,7 @@ internal static class Program
                 var events = new List<Dictionary<string, string>>();
                 foreach (var (type, connection) in changes)
                     events.Add(CreateEvent(cfg.agent_id, snapshot, type, connection));
-                if (heartbeatDue) events.AddRange(CreateSnapshot(cfg.agent_id, snapshot, current.Values));
+                if (heartbeatDue) { events.AddRange(CreateSnapshot(cfg.agent_id, snapshot, current.Values)); events.AddRange(NetworkContext.Capture(cfg.agent_id,snapshot,cfg.device_category)); }
                 foreach (var row in events) row["DEVICE_CATEGORY"] = cfg.device_category;
                 QueueBatch(cfg.spool_dir, events);
                 previous = current;

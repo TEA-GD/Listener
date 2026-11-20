@@ -56,3 +56,7 @@ Portable task-definition checks: `dotnet run --project tests/AgentTaskDefinition
 ## Offline delivery and timeline
 
 Unacknowledged events stay in the local spool across Collector/network outages and agent restarts. Reconnection retries the original payloads; only matching durable Collector ACKs delete files. Slow replay batches yield after roughly five seconds between acknowledged events so sampling resumes; an in-flight send may take its normal timeout. The default spool limit is 50,000 events; a full spool preserves pending files and refuses new collection. The updated Collector/GUI can mark delayed working periods orange after these heartbeats arrive; see [orange timeline semantics and upgrade order](../Listener_DB_GUI/README.md#orange-working-periods-after-offline-replay).
+
+## Minute network/process context
+
+Each heartbeat also samples active network adapters and running processes/services, correlating them by device and snapshot ID. Deploy the updated Collector before this agent. Windows embeds the shared metadata-only PowerShell sampler; Linux uses interface/process metadata and optional NetworkManager/systemd labels. See [fields, limits, privacy and GUI deployment](../Listener_DB_GUI/README.md#device-network-communications-and-running-processes). Context shares the existing finite spool and ACK delivery, increasing disk/database volume.

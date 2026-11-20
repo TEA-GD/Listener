@@ -76,7 +76,7 @@ class LinuxPackage(unittest.TestCase):
                 self.assertIn('Acknowledged:',result.stdout)
                 self.assertTrue(received and all(e['DEVICE_CATEGORY']=='linux_servers' for e in received))
                 self.assertTrue(any(e['EVENT_TYPE']=='HEARTBEAT' and e['MONITORED_HOST']=='linux-package-test' for e in received))
-                self.assertTrue(any(e['PROTOCOL']=='UDP' and e['SOURCE_PORT']==str(udp_port) and e['RECIEVER_IP']=='' and e['PORT_USED']=='' for e in received),'Packaged agent did not report live UDP endpoint')
+                self.assertTrue(any(e.get('PROTOCOL')=='UDP' and e['SOURCE_PORT']==str(udp_port) and e['RECIEVER_IP']=='' and e['PORT_USED']=='' for e in received),'Packaged agent did not report live UDP endpoint')
                 self.assertEqual([],list((root/'spool').glob('*.json')))
 
 if __name__=='__main__':unittest.main(verbosity=2)

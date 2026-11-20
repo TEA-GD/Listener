@@ -40,8 +40,10 @@ class ServerAgent(unittest.TestCase):
             result=run('Checks');self.assertEqual(0,result.returncode,result.stdout+result.stderr)
             for f in (root/'spool').glob('*.json'):f.unlink()
             result=run('Collect');self.assertEqual(1,result.returncode,result.stdout+result.stderr)
-            files=list((root/'spool').glob('*.json'));self.assertEqual(3,len(files),result.stdout+result.stderr)
+            files=list((root/'spool').glob('*.json'))
             events=[json.loads(f.read_text()) for f in files]
+            events=[row for row in events if row['EVENT_TYPE'] not in ('NETWORK_CONTEXT','PROCESS_CONTEXT','CONTEXT_COMPLETE')]
+            self.assertEqual(3,len(events),result.stdout+result.stderr)
             self.assertEqual({'ACTIVE_AT_START','TCP_SNAPSHOT','HEARTBEAT'},{r['EVENT_TYPE'] for r in events})
             active=next(r for r in events if r['EVENT_TYPE']=='ACTIVE_AT_START')
             self.assertEqual('server-process.exe',active['PROCESS_NAME'])

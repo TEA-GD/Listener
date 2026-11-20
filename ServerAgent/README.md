@@ -159,3 +159,7 @@ Registration asks for the device category when no saved choice exists. For unatt
 ## Replaying offline data
 
 The ServerAgent retains unacknowledged spool files and retries when the Collector is reachable, preserving original UTC timestamps. Slow replay batches now yield between acknowledged events after roughly five seconds; the next collection iteration continues before another batch. In-flight connection/read timeouts still apply. The spool is bounded by `max_spool_events`; full capacity stops new collection rather than deleting unsent evidence. Delayed heartbeats appear orange after receipt in the updated Collector/GUI; see [timeline semantics](../Listener_DB_GUI/README.md#orange-working-periods-after-offline-replay).
+
+## Network/process context
+
+Registration copies `Shared/NetworkContext.ps1` beside the installed agent. Each heartbeat samples active adapters and running processes/services and sends context events through the existing spool. Update the Collector first, then re-register this agent from the complete repository layout. See [network context fields and limitations](../Listener_DB_GUI/README.md#device-network-communications-and-running-processes).

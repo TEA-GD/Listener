@@ -42,6 +42,7 @@ app.MapGet("/api/connection-names",(HttpRequest request,ConnectionNames names)=>
         throw new ArgumentException("Invalid IP address.")).DistinctBy(pair=>pair.Input).ToArray();
     return Results.Ok(new { names=addresses.ToDictionary(pair=>pair.Input,pair=>names.Request(pair.Address)) });
 });
+app.MapGet("/api/network-context",(HttpRequest request,ViewerDatabase database)=>NetworkContextView.Read(request,database));
 app.MapGet("/api/pcs", (ViewerDatabase database) => {
     using var db = database.Open();
     var devices=ViewerDatabase.HasReadModel(db)

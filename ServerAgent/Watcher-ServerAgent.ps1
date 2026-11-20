@@ -194,6 +194,15 @@ function Invoke-ServerAgent([string]$Path, [bool]$RunOnce) {
                         $kind='TCP_SNAPSHOT'; if ($socket.Protocol -eq 'UDP') { $kind='UDP_SNAPSHOT' }
                         $batch.Add((New-AgentEvent $config $snapshot $kind $socket))
                     }
+                    try {
+                        $contextScript=Join-Path $PSScriptRoot 'NetworkContext.ps1'
+                        if (-not(Test-Path $contextScript)) { $contextScript=Join-Path (Split-Path $PSScriptRoot -Parent) 'Shared/NetworkContext.ps1' }
+                        $context=(& $contextScript | ConvertFrom-Json)
+                        foreach($network in $context.networks){ $r=New-AgentEvent $config $snapshot 'NETWORK_CONTEXT' $null; $r.CONTEXT_JSON=ConvertTo-Json $network -Compress; $batch.Add($r) }
+                        foreach($process in @($context.processes | Select-Object -First 4096)){ $r=New-AgentEvent $config $snapshot 'PROCESS_CONTEXT' $null; $r.CONTEXT_JSON=ConvertTo-Json $process -Compress; $batch.Add($r) }
+                        $r=New-AgentEvent $config $snapshot 'CONTEXT_COMPLETE' $null
+                        $r.CONTEXT_JSON=ConvertTo-Json @{networks=@($context.networks).Count;processes=[Math]::Min(4096,@($context.processes).Count);status=$context.status;note=$context.note} -Compress; $batch.Add($r)
+                    } catch { Write-AgentLog $config ('Network context unavailable: '+$_.Exception.Message) }
                     $complete=New-AgentEvent $config $snapshot 'HEARTBEAT' $null
                     $complete.STATE='SNAPSHOT_COMPLETE:'+$current.Count
                     $batch.Add($complete)

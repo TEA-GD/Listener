@@ -366,6 +366,7 @@ internal static class Database
         }
         InitializePartitions(db, transaction);
         GuiReadModel.Initialize(db, transaction);
+        NetworkContextSchema.Initialize(db, transaction);
         MailDatabaseSchema.Initialize(db, transaction);
         transaction.Commit();
     }
@@ -420,7 +421,7 @@ internal static class Database
         string timestamp = Required(row, "TIMESTAMP_UTC");
         if (host is "." or ".." || !SafeHost.IsMatch(host)) throw new ArgumentException("Invalid MONITORED_HOST");
         if (!Guid.TryParseExact(eventId, "D", out _)) throw new ArgumentException("Invalid EVENT_ID GUID");
-        if (!EventTypes.Contains(eventType)) throw new ArgumentException("Invalid EVENT_TYPE");
+        if (!EventTypes.Contains(eventType) && eventType is not ("NETWORK_CONTEXT" or "PROCESS_CONTEXT" or "CONTEXT_COMPLETE")) throw new ArgumentException("Invalid EVENT_TYPE");
         if (eventType.StartsWith("UDP_", StringComparison.Ordinal) &&
             (Required(row, "PROTOCOL") != "UDP" || !int.TryParse(Required(row, "SOURCE_PORT"), out int localPort) || localPort is < 1 or > 65535))
             throw new ArgumentException("UDP endpoint events require PROTOCOL UDP and a valid SOURCE_PORT");
@@ -441,6 +442,9 @@ internal static class Database
         registry.Parameters.AddWithValue("$id", eventId);
         registry.Parameters.AddWithValue("$category", category);
         if (registry.ExecuteNonQuery() == 0) { transaction.Commit(); return eventId; }
+        if(eventType is "NETWORK_CONTEXT" or "PROCESS_CONTEXT" or "CONTEXT_COMPLETE"){
+            NetworkContextSchema.Store(db,transaction,row,host,timestamp,eventType);transaction.Commit();return eventId;
+        }
         using var insert = db.CreateCommand();
         insert.Transaction = transaction;
         insert.CommandText = "INSERT INTO events_" + category + "(" +

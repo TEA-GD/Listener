@@ -32,6 +32,8 @@ if ([string]::IsNullOrWhiteSpace($AgentId)) {
 if ($AgentId -notmatch '^[A-Za-z0-9_.-]{1,120}$' -or $AgentId -in @('.','..')) { throw 'Invalid AgentId; use a hostname with letters, digits, dots, underscores or hyphens.' }
 if (-not $DeviceCategory -or $DeviceCategory -eq 'legacy') { $DeviceCategory = Read-Host 'Device type: linux_servers, windows_servers, user_pcs, project_stands' }
 if ($DeviceCategory -cnotin @('linux_servers','windows_servers','user_pcs','project_stands')) { throw 'Choose a valid DeviceCategory' }
+$contextSource=Join-Path (Split-Path $PSScriptRoot -Parent) 'Shared/NetworkContext.ps1'
+if (-not(Test-Path -LiteralPath $contextSource -PathType Leaf)) { throw 'Keep Shared/NetworkContext.ps1 in the repository layout before registration.' }
 $previous = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($previous) {
     Stop-ScheduledTask -TaskName $taskName
@@ -47,6 +49,7 @@ if ($previous) {
 if ($LASTEXITCODE -ne 0) { throw 'Could not protect the agent directory.' }
 $script = Join-Path $directory 'Watcher-ServerAgent.ps1'
 if ([IO.Path]::GetFullPath($source) -ne [IO.Path]::GetFullPath($script)) { Copy-Item -LiteralPath $source -Destination $script -Force }
+Copy-Item -LiteralPath $contextSource -Destination (Join-Path $directory 'NetworkContext.ps1') -Force
 $spool = Join-Path $directory 'spool'
 [IO.Directory]::CreateDirectory($spool) | Out-Null
 $config = [ordered]@{

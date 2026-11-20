@@ -11,4 +11,5 @@
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
 <ItemGroup><Compile Include="../../../Shared/DeviceCategories.cs" Link="DeviceCategories.cs" /></ItemGroup>
+<ItemGroup><EmbeddedResource Include="../../../Shared/NetworkContext.ps1" LogicalName="Watcher.NetworkContext.ps1" /></ItemGroup>
 </Project>

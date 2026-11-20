@@ -291,3 +291,21 @@ Deploy the updated **Collector first**, then the **GUI**, and reload the browser
 The updated compiled Agent and PowerShell ServerAgent also yield between acknowledged events when a slow replay batch has consumed about five seconds, allowing the collection loop to run again. Existing connect/read timeouts still apply to the in-flight event. Older agents' retained data is compatible with the orange graph; updating agents provides this replay responsiveness improvement.
 
 Buffering is finite: the compiled agent currently allows 50,000 pending events, and ServerAgent uses its configured `max_spool_events`. At capacity, new collection fails rather than discarding existing queued evidence; a missing period cannot be reconstructed without retained heartbeats. Keep the spool on persistent storage and size deployments for expected outage volume. The GUI cannot observe periods whose queued files were deleted or never collected.
+
+## Device network communications and running processes
+
+Below the daily online timeline, open **Show networks & processes**. Choose a UTC day, then **Inspect sample** to see active adapters, their network names and the processes/services observed in the same minute. Lists are paginated (50 samples and 200 process entries per page), with VPN candidates first. The context day filter is UTC independently of the timeline's selected time zone; all sample/detail timestamps are labelled UTC.
+
+Update the **Collector first**, then the **agents**, then rebuild/restart the **GUI**. New context event types require the updated Collector before agents send them. Existing agents and old connection history remain compatible, but cannot retroactively supply network/process snapshots. Both compiled Windows/Linux agents and the PowerShell ServerAgent sample context on their heartbeat (normally every 60 seconds). ServerAgent registration also copies `Shared/NetworkContext.ps1`; keep the repository layout when registering/updating.
+
+Database tables:
+
+- `device_network_communications`: device (`host`), snapshot/time and receipt time, adapter ID/name, network type (`wifi`, `ethernet`, `vpn`, `other`), network name, connection/adapter description, state, addresses and gateway.
+- `device_process_snapshots`: device, snapshot/time and receipt time, process/service type, PID, name, executable path and process start time where available, plus a name-based VPN candidate flag.
+- `device_context_snapshots`: expected counts and coverage notes. A snapshot is shown only when its marker and all expected rows have arrived. Offline replay uses the existing spool and durable ACKs, and duplicate event IDs do not duplicate context.
+
+Windows uses active adapters and network profiles; Wi-Fi SSID is used when `netsh` exposes a matching interface GUID, otherwise the profile label is retained. Ethernet has no SSID; profile labels may be generic. Linux uses NetworkManager connection labels when available, otherwise adapter details with an empty network name. BSSID/access-point MAC and saved Wi-Fi passwords are not collected. Active VPN adapters may be identified from adapter type/name; other virtual adapters remain visible with their descriptions.
+
+Running processes and services are sampled, not every launch/termination event: brief programs between samples can be missed. Start time/path are best effort; service rows may lack start time/PID. OpenVPN, Amnezia, WireGuard and other VPN-like names are correlation hints, not proof a VPN tunnel was connected, used for a given socket, or routed a particular application. A running service may be idle. No command lines, environment variables, credentials, packet payloads or message contents are collected.
+
+Permission failures are reported as partial samples; samples cap at 128 adapters and 4,096 process/service entries, and metadata fields are limited to 256 characters. Context increases storage and spool volume substantially; the existing 50,000-event compiled-agent buffer remains finite and may fill sooner during an outage. No historical data is deleted by this update.
