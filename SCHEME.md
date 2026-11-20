@@ -281,3 +281,7 @@ Agents retain unsent events locally, replay original timestamps/IDs after reconn
 ## Minute network/process correlation
 
 Agents send `NETWORK_CONTEXT`, `PROCESS_CONTEXT` and a final `CONTEXT_COMPLETE` count marker through their existing durable spool. The Collector routes these into `device_network_communications`, `device_process_snapshots` and `device_context_snapshots` in the same transaction as global event-ID reservation. These payloads do not enter the connection-events view, CSV exports or Analyzer input. Global sequence gaps are retained. The online-history page's context panel reads complete samples by device/day and correlates adapters with process/service observations by snapshot ID. Deploy Collector before agents. See [field and coverage documentation](Listener_DB_GUI/README.md#device-network-communications-and-running-processes).
+
+## Daily timeline UI
+
+The GUI defaults to three days with configurable rows per page and a selected date range. Each daily activity graph includes a timezone-aligned network-sample strip, using bounded two-minute estimates rather than carrying stale adapter state across gaps. Range totals include all selected dates. A device-specific empty analysis destination is linked beside the graph button. This is a GUI-only change; see [timeline navigation](Listener_DB_GUI/README.md#daily-timeline-navigation-and-network-strips).

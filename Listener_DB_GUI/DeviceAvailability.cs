@@ -70,7 +70,7 @@ internal sealed class DeviceAvailability(int timeoutSeconds,int deliveryDelaySec
         var now=DateTimeOffset.UtcNow;
         var today=DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now,zone).DateTime);
         DateOnly Date(string key,DateOnly fallback){string value=request.Query[key].ToString();if(value.Length==0)return fallback;if(!DateOnly.TryParseExact(value,"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out var parsed))throw new ArgumentException("Dates must use yyyy-MM-dd.");return parsed;}
-        var from=Date("from",today.AddDays(-6));var to=Date("to",today);
+        var from=Date("from",today.AddDays(-2));var to=Date("to",today);
         if(from>to||to>today||to.DayNumber-from.DayNumber>=90)throw new ArgumentException("Choose a range of 1–90 days ending no later than today in the selected time zone.");
         DateTimeOffset Midnight(DateOnly day){
             var local=day.ToDateTime(TimeOnly.MinValue,DateTimeKind.Unspecified);
@@ -79,10 +79,15 @@ internal sealed class DeviceAvailability(int timeoutSeconds,int deliveryDelaySec
             if(zone.IsAmbiguousTime(local))return new DateTimeOffset(local,zone.GetAmbiguousTimeOffsets(local).Max()).ToUniversalTime();
             return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(local,zone));
         }
+        int Number(string key,int fallback,int max){string value=request.Query[key].ToString();if(value=="")return fallback;if(!int.TryParse(value,out int n)||n<1||n>max)throw new ArgumentException("Invalid timeline page or days per page");return n;}
+        int perPage=Number("days",90,90),totalDays=to.DayNumber-from.DayNumber+1,pages=(totalDays+perPage-1)/perPage;
+        int page=Number("page",1,90);if(page>pages)throw new ArgumentException("Timeline page is outside the selected dates");
+        var visibleFrom=from.AddDays((page-1)*perPage);var visibleTo=DateOnly.FromDayNumber(Math.Min(to.DayNumber,visibleFrom.DayNumber+perPage-1));
         var start=Midnight(from);var end=Midnight(to.AddDays(1));
         using var db=database.Open();
         if(ViewerDatabase.Query(db,"SELECT 1 FROM events WHERE host=$host LIMIT 1",new(){{"$host",host}}).Count==0)return Results.NotFound(new{error="Device not found"});
         var history=Load(db,host,now,start.ToUnixTimeMilliseconds(),end.ToUnixTimeMilliseconds());
+        var network=NetworkTimeline.Load(db,host,Midnight(visibleFrom),Midnight(visibleTo.AddDays(1)),now);
         long nowMs=now.ToUnixTimeMilliseconds();
         var days=new List<object>();long totalOnline=0,totalOffline=0,totalBuffered=0;
         for(var date=from;date<=to;date=date.AddDays(1)){
@@ -107,8 +112,10 @@ internal sealed class DeviceAvailability(int timeoutSeconds,int deliveryDelaySec
             var ticks=new List<object>();for(long t=a;t<b;t+=3600000L)ticks.Add(new{offset_seconds=(t-a)/1000.0,label=TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(t),zone).ToString("HH:mm",CultureInfo.InvariantCulture)});
             ticks.Add(new{offset_seconds=(b-a)/1000.0,label="24:00"});
             totalOnline+=online;totalOffline+=offline;totalBuffered+=bufferedTime;
-            days.Add(new{date=date.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture),day_seconds=(b-a)/1000.0,online_seconds=online/1000.0,buffered_seconds=bufferedTime/1000.0,connected_seconds=(online-bufferedTime)/1000.0,offline_seconds=offline/1000.0,segments,ticks});
+            if(date<visibleFrom||date>visibleTo)continue;
+            var networkSegments=network.Where(n=>n.Start<b&&n.End>a).Select(n=>new{label=n.Label,type=n.Type,start_utc=DateTimeOffset.FromUnixTimeMilliseconds(Math.Max(a,n.Start)).ToString("o"),end_utc=DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(b,n.End)).ToString("o"),offset_seconds=(Math.Max(a,n.Start)-a)/1000.0,duration_seconds=(Math.Min(b,n.End)-Math.Max(a,n.Start))/1000.0}).ToArray();
+            days.Add(new{network_segments=networkSegments,date=date.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture),day_seconds=(b-a)/1000.0,online_seconds=online/1000.0,buffered_seconds=bufferedTime/1000.0,connected_seconds=(online-bufferedTime)/1000.0,offline_seconds=offline/1000.0,segments,ticks});
         }
-        return Results.Ok(new{host,timezone=zoneId,from=from.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture),to=to.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture),generated_utc=now.ToString("o"),summary=Summary(history,now),total_online_seconds=totalOnline/1000.0,total_buffered_seconds=totalBuffered/1000.0,total_connected_seconds=(totalOnline-totalBuffered)/1000.0,total_offline_seconds=totalOffline/1000.0,days});
+        return Results.Ok(new{host,timezone=zoneId,page,days_per_page=perPage,total_days=totalDays,pages,from=from.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture),to=to.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture),generated_utc=now.ToString("o"),summary=Summary(history,now),total_online_seconds=totalOnline/1000.0,total_buffered_seconds=totalBuffered/1000.0,total_connected_seconds=(totalOnline-totalBuffered)/1000.0,total_offline_seconds=totalOffline/1000.0,days});
     }
 }

@@ -2,12 +2,12 @@
 'use strict';
 const $=id=>document.getElementById(id),host=new URLSearchParams(location.search).get('host');
 const make=(tag,text)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n;};
-let controller=null,loaded=false,applied=null;
+let controller=null,loaded=false,applied=null,page=1;
 function duration(value){let s=Math.max(0,Math.floor(value||0));const d=Math.floor(s/86400);s%=86400;const h=Math.floor(s/3600);s%=3600;const m=Math.floor(s/60);return (d?d+'d ':'')+(h?h+'h ':'')+(m?m+'m ':'')+(s%60)+'s';}
 function dateInZone(date,zone){const parts=new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date);return ['year','month','day'].map(type=>parts.find(p=>p.type===type).value).join('-');}
 function local(value,zone){return value?new Intl.DateTimeFormat('en-GB',{timeZone:zone,dateStyle:'medium',timeStyle:'medium'}).format(new Date(value)):'—';}
 function error(message){$('onlineError').textContent=message;$('onlineError').hidden=!message;}
-function defaults(){const zone=$('onlineTimezone').value;const end=dateInZone(new Date(),zone),start=new Date(end+'T00:00:00Z');start.setUTCDate(start.getUTCDate()-6);$('onlineFrom').value=start.toISOString().slice(0,10);$('onlineTo').value=end;$('onlineTo').max=end;}
+function defaults(){const zone=$('onlineTimezone').value;const end=dateInZone(new Date(),zone),start=new Date(end+'T00:00:00Z');start.setUTCDate(start.getUTCDate()-2);$('onlineFrom').value=start.toISOString().slice(0,10);$('onlineTo').value=end;$('onlineTo').max=end;}
 $('onlineTimezone').value=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';defaults();
 if(host)$('onlineTitle').textContent=host+' · Online history';
 function draw(data){
@@ -19,6 +19,7 @@ function draw(data){
     $('onlineSubtitle').textContent='Reported availability in '+data.timezone+' · refreshed '+local(data.generated_utc,data.timezone);
     $('onlineMethod').textContent='A heartbeat keeps a device online for '+summary.timeout_seconds+' seconds. Orange means heartbeat delivery was delayed by more than '+summary.delivery_delay_seconds+' seconds; it can only be reconstructed after buffered reports arrive. Current and last online periods use retained history; the selected date range controls the daily chart and totals. Up to 90 days per view.';
     $('onlineTimelineSummary').textContent=data.from+' → '+data.to+' · '+data.timezone;
+    $('timelinePage').textContent='Page '+data.page+' of '+data.pages+' · '+data.total_days+' days selected';$('timelinePrev').disabled=data.page<=1;$('timelineNext').disabled=data.page>=data.pages;
     $('onlineTimeline').replaceChildren();$('onlinePeriods').replaceChildren();
     const ns='http://www.w3.org/2000/svg';
     for(const day of data.days){
@@ -38,7 +39,16 @@ function draw(data){
             add('line',{x1:x,x2:x,y1:38,y2:43,class:'availability-tick'});
             if(i%3===0||i===day.ticks.length-1)add('text',{x,y:58,'text-anchor':i===0?'start':i===day.ticks.length-1?'end':'middle',class:'chart-label'},tick.label);
         }
-        scroll.append(svg);row.append(scroll);$('onlineTimeline').append(row);
+        scroll.append(svg);
+        const strip=document.createElementNS(ns,'svg');strip.setAttribute('viewBox','0 0 1000 30');strip.setAttribute('role','img');strip.setAttribute('aria-label',day.date+' network connections');strip.classList.add('network-strip');
+        const background=document.createElementNS(ns,'rect');for(const [key,value] of Object.entries({x:20,y:4,width:960,height:16,class:'network-unknown'}))background.setAttribute(key,value);strip.append(background);
+        for(const segment of day.network_segments||[]){
+            const rect=document.createElementNS(ns,'rect');for(const [key,value] of Object.entries({x:20+segment.offset_seconds/full*960,y:4,width:Math.max(.4,segment.duration_seconds/full*960),height:16,class:'network-segment '+segment.type,tabindex:0}))rect.setAttribute(key,value);
+            const label=segment.label+' · '+local(segment.start_utc,data.timezone)+' → '+local(segment.end_utc,data.timezone);rect.setAttribute('aria-label',label);const title=document.createElementNS(ns,'title');title.textContent=label;rect.append(title);strip.append(rect);
+            if(segment.duration_seconds/full*960>90){const text=document.createElementNS(ns,'text');text.setAttribute('x',25+segment.offset_seconds/full*960);text.setAttribute('y',16);text.setAttribute('class','network-strip-label');text.textContent=segment.label.slice(0,Math.floor(segment.duration_seconds/full*140));strip.append(text);}
+        }
+        scroll.append(strip);
+        const names=make('div',undefined);names.className='network-day-labels';const labels=[...new Set((day.network_segments||[]).map(s=>s.label))];names.textContent=labels.length?labels.slice(0,8).join(' · ')+(labels.length>8?' · More networks: hover the strip for details.':''):'No network samples available for this day.';scroll.append(names);row.append(scroll);$('onlineTimeline').append(row);
     }
     if(!$('onlinePeriods').children.length){const tr=make('tr'),td=make('td','No reported online periods in these dates.');td.colSpan=5;tr.append(td);$('onlinePeriods').append(tr);}
 }
@@ -46,13 +56,15 @@ async function load(auto=false){
     if(!host){error('Choose a device in the main dashboard and click Show online graph.');return;}
     controller?.abort();const request=new AbortController();controller=request;
     try{
-        const values=auto&&applied?applied:{host,from:$('onlineFrom').value,to:$('onlineTo').value,tz:$('onlineTimezone').value};
+        const values=auto&&applied?applied:{host,from:$('onlineFrom').value,to:$('onlineTo').value,tz:$('onlineTimezone').value,days:$('onlineDays').value,page};
         const today=dateInZone(new Date(),values.tz);if(!auto)$('onlineTo').max=today;
         const query=new URLSearchParams(values);
         const response=await fetch('/api/availability?'+query,{signal:request.signal});const data=await response.json();if(!response.ok)throw Error(data.error||'Could not load online history.');if(request.signal.aborted)return;error('');draw(data);applied={...values};loaded=true;
     }catch(e){if(e.name!=='AbortError'){error(e.message);$('onlineState').textContent='Unavailable';$('onlineState').className='device-ip-unknown';}}
 }
-$('onlineFilters').onsubmit=e=>{e.preventDefault();load();};$('onlineRefresh').onclick=()=>load();
+$('onlineFilters').onsubmit=e=>{e.preventDefault();page=1;load();};$('onlineRefresh').onclick=()=>load();
+$('timelinePrev').onclick=()=>{if(applied&&Number(applied.page)>1){page=Number(applied.page)-1;applied={...applied,page};load(true);}};
+$('timelineNext').onclick=()=>{if(applied&&!$('timelineNext').disabled){page=Number(applied.page)+1;applied={...applied,page};load(true);}};
 $('onlineTimezone').onchange=()=>{try{$('onlineTo').max=dateInZone(new Date(),$('onlineTimezone').value);}catch(e){error('Choose a valid time zone, such as UTC or Europe/Moscow.');}};
 setInterval(()=>{if(loaded&&!document.hidden)load(true);},10000);load();
 })();

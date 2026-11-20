@@ -65,7 +65,7 @@ class AvailabilityTests(unittest.TestCase):
             expect(page.locator('#deviceIPs')).to_have_class('device-ip-online');expect(page.locator('#deviceIPs')).to_have_css('color','rgb(37, 99, 235)');expect(page.locator('#deviceOnlineStatus')).to_contain_text('Online for')
             page.get_by_role('link',name='Show online graph',exact=True).click()
             expect(page.locator('#onlineTitle')).to_have_text('Live-PC · Online history');expect(page.locator('#onlineState')).to_have_text('Online')
-            expect(page.locator('#onlineTimezone')).to_have_value('Europe/Moscow');expect(page.locator('.online-day')).to_have_count(7)
+            expect(page.locator('#onlineTimezone')).to_have_value('Europe/Moscow');expect(page.locator('.online-day')).to_have_count(3)
             expect(page.locator('.availability-segment.online')).not_to_have_count(0)
             page.get_by_text('Show exact online periods',exact=True).click();expect(page.locator('#onlinePeriods')).to_contain_text('+03:00')
             page.get_by_role('link',name='Back to devices',exact=True).click();page.get_by_role('button',name='Offline-PC',exact=False).click()

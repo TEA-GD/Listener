@@ -14,3 +14,7 @@
 .buffered-swatch,.availability-segment.buffered{fill:#f59e0b;background:#f59e0b}#bufferedRangeTotal{color:#b45309}
 
 .context-body{padding:20px}.context-body h3{font-size:14px;margin-top:24px}
+
+.device-actions{display:flex;flex-wrap:wrap;gap:8px}.online-timeline{max-height:none}.online-day .network-strip{height:auto}.network-unknown{fill:#e2e8f0}.network-segment.wifi{fill:#0d9488}.network-segment.ethernet{fill:#3b82f6}.network-segment.vpn{fill:#8b5cf6}.network-segment.mixed{fill:#6366f1}.network-segment.other{fill:#64748b}.network-segment:focus,.network-segment:hover{stroke:#0f172a;stroke-width:2}.network-strip-label{fill:white;font-size:10px;pointer-events:none}
+
+.network-day-labels{font-size:11px;color:#526b9a;line-height:1.6;overflow-wrap:anywhere;margin:0 20px 8px}

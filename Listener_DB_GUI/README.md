@@ -309,3 +309,13 @@ Windows uses active adapters and network profiles; Wi-Fi SSID is used when `nets
 Running processes and services are sampled, not every launch/termination event: brief programs between samples can be missed. Start time/path are best effort; service rows may lack start time/PID. OpenVPN, Amnezia, WireGuard and other VPN-like names are correlation hints, not proof a VPN tunnel was connected, used for a given socket, or routed a particular application. A running service may be idle. No command lines, environment variables, credentials, packet payloads or message contents are collected.
 
 Permission failures are reported as partial samples; samples cap at 128 adapters and 4,096 process/service entries, and metadata fields are limited to 256 characters. Context increases storage and spool volume substantially; the existing 50,000-event compiled-agent buffer remains finite and may fill sooner during an outage. No historical data is deleted by this update.
+
+## Daily timeline navigation and network strips
+
+The online-history page initially shows the last **three local calendar days**. Choose From/To dates and **Days at a time** (3, 7, 14, 30 or 90), then click **Show timeline**. Previous/Next days pages through the selected range. Totals continue to cover the entire chosen range; each page shows only its own daily rows and network strips. Time-zone changes and 23/25-hour DST days apply to both tracks.
+
+A smaller network strip appears below each day's working-time graph. It uses the active adapters in stored minute samples: Wi-Fi, Ethernet, VPN, other or multiple adapters. Hover/focus a segment for network/profile names and times; labels below the strip summarize the networks observed that day. Empty space is unknown, not a claim of disconnection. A sample extends only until the next network sample, two minutes, or the current time, whichever comes first. Equal consecutive observations merge; empty samples stop the previous connection estimate. Network rows must match their marker's expected network count; process rows can arrive independently without withholding network evidence. The strip does not prove that a particular adapter carried traffic or supported every heartbeat.
+
+The device card also has **It's time to analyze** beside **Show online graph**. It opens `analyze.html?host=...`, an intentionally empty page reserved for future analysis.
+
+Rebuild/restart only the GUI and reload the browser. No new Collector/agent update or schema change is required. Network strips need samples collected by the previous network-context update; older history stays grey where no such evidence exists.
