@@ -265,3 +265,7 @@ The Collector maintains derived `gui_*` tables in the event transaction. The rea
 ## Connection-name annotations
 
 The GUI displays agent-reported source/destination names from existing event fields. Missing source names use the monitored device identity; missing peer names use bounded background reverse DNS on the GUI server, with caching and timeouts. Current DNS annotations do not change stored events or frozen capture data. See [GUI connection names](Listener_DB_GUI/README.md#connection-names).
+
+## Windows agent task and notebook power
+
+The compiled-agent installer creates/replaces an explicit SYSTEM startup task that permits battery startup and unplugging, has no execution time limit, and retries failures. Apply the policy to older installations using **Install / Update** in the rebuilt installer. Configuration and queued events are preserved. The separate PowerShell ServerAgent already uses equivalent battery/runtime settings. See [notebook deployment and verification](Agent/README.md#notebooks-run-on-battery-power).

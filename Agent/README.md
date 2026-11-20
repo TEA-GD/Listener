@@ -34,3 +34,21 @@ Portable lifecycle regression checks: `dotnet run --project tests/AgentControls 
 ## Device category
 
 Setup now requires a **Device type** selection: Linux servers, Windows servers, User PCs, or Project Stands. Updates load the saved choice; older configurations without a choice require selection once. Future events are tagged with that category before entering the spool. Updates preserve queued events with their original category. Update the Collector first. See [device storage and migration](../DEVICE-STORAGE.md).
+
+## Notebooks: run on battery power
+
+The rebuilt Windows installer explicitly sets `DisallowStartIfOnBatteries=false`, `StopIfGoingOnBatteries=false` and `ExecutionTimeLimit=PT0S`. The agent can start while unplugged, remains running when AC power is removed, and has no 72-hour task limit. It runs as elevated SYSTEM at startup without a user login, permits on-demand launch, ignores duplicate instances, and retries failures every minute (up to 255 retries). It does not wait for idle or network availability; queued events retain the existing offline buffering behavior.
+
+Older installer EXEs created the task with Windows defaults, which could leave it **Queued** on battery. Download the updated sources, run `Agent/build/Build-Windows.bat`, then run `Agent/output/windows-installer/WatcherInstaller.exe` as Administrator and choose **Install / Update**. This replaces the task settings for an existing installation while retaining saved configuration/custom spool settings and unsent events. **Launch Agent** alone starts the saved task and does not repair its settings; use **Install / Update** once to apply this fix. Uninstalling is unnecessary.
+
+Verify on a Windows test notebook after updating:
+
+```powershell
+(Get-ScheduledTask -TaskName 'Watcher-Connection-Agent').Settings |
+    Format-List DisallowStartIfOnBatteries, StopIfGoingOnBatteries, ExecutionTimeLimit
+Get-ScheduledTask -TaskName 'Watcher-Connection-Agent' | Select-Object TaskName, State
+```
+
+Expected settings are `False`, `False`, `PT0S`. Start the task on battery, unplug/reconnect AC, close the setup window, and confirm it stays `Running` and delivers/buffers events. Windows sleep, hibernation and shutdown still suspend monitoring; these settings do not keep the notebook awake.
+
+Portable task-definition checks: `dotnet run --project tests/AgentTaskDefinition -c Release`. The generated XML was also checked against the [Microsoft Task Scheduler schema](https://learn.microsoft.com/en-us/windows/win32/taskschd/task-scheduler-schema). Actual Task Scheduler execution and power transitions require Windows.

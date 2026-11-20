@@ -1,0 +1,30 @@
+using System.Xml.Linq;
+using WatcherInstaller;
+
+static void Check(bool condition,string message){if(!condition)throw new Exception(message);}
+XNamespace ns="http://schemas.microsoft.com/windows/2004/02/mit/task";
+string directory=@"C:\Program Files\Watcher & Tools\Agent",executable=directory+@"\WatcherAgent.exe",config=@"C:\ProgramData\Watcher & Tools\agent.json";
+var task=XDocument.Parse(AgentTaskDefinition.Create(executable,config,directory));
+if(args.Length==1)task.Save(args[0]);
+var root=task.Root!;
+Check(root.Name==ns+"Task"&&(string?)root.Attribute("version")=="1.3","Wrong task schema");
+var settings=root.Element(ns+"Settings")!;
+string Setting(string name)=>settings.Element(ns+name)!.Value;
+Check(Setting("DisallowStartIfOnBatteries")=="false","Battery power blocks startup");
+Check(Setting("StopIfGoingOnBatteries")=="false","Unplugging stops the agent");
+Check(Setting("ExecutionTimeLimit")=="PT0S","Continuous agent has a time limit");
+Check(Setting("RunOnlyIfIdle")=="false"&&Setting("RunOnlyIfNetworkAvailable")=="false","Idle/network conditions block startup");
+Check(Setting("StartWhenAvailable")=="true"&&Setting("AllowStartOnDemand")=="true","Missed boot/manual launches disabled");
+Check(Setting("MultipleInstancesPolicy")=="IgnoreNew","Duplicate task instances allowed");
+var restart=settings.Element(ns+"RestartOnFailure")!;
+Check(restart.Element(ns+"Interval")!.Value=="PT1M"&&restart.Element(ns+"Count")!.Value=="255","Failure recovery missing");
+var principal=root.Element(ns+"Principals")!.Element(ns+"Principal")!;
+Check(principal.Element(ns+"UserId")!.Value=="S-1-5-18"&&principal.Element(ns+"RunLevel")!.Value=="HighestAvailable","Task is not elevated SYSTEM");
+Check(root.Element(ns+"Triggers")!.Element(ns+"BootTrigger")!.Element(ns+"Enabled")!.Value=="true","No enabled boot trigger");
+var actions=root.Element(ns+"Actions")!;
+Check((string?)actions.Attribute("Context")== (string?)principal.Attribute("id"),"Action uses wrong principal");
+var action=actions.Element(ns+"Exec")!;
+Check(action.Element(ns+"Command")!.Value==executable,"Executable path escaped incorrectly");
+Check(action.Element(ns+"Arguments")!.Value=="--config \""+config+"\"","Configuration path not quoted correctly");
+Check(action.Element(ns+"WorkingDirectory")!.Value==directory,"Working directory missing");
+Console.WriteLine("PASS: battery startup, unplugging, unlimited runtime, SYSTEM boot task, recovery, single instance and XML/path escaping");

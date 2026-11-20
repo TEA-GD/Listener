@@ -409,9 +409,7 @@ internal sealed class InstallerForm : Form
             InstallationFiles.WriteAtomically(config,settingsStream);
             log("Updated protected configuration: "+config);
 
-            string taskCommand=$"\"{agentExe}\" --config \"{config}\"";
-            Run("schtasks.exe","/Create","/TN",TaskName,"/SC","ONSTART","/RU","SYSTEM",
-                "/RL","HIGHEST","/TR",taskCommand,"/F");
+            RegisterStartupTask(agentExe,config,log);
             Run("schtasks.exe","/Run","/TN",TaskName);
             installed=true;
             log("Created and started Windows task: "+TaskName);
@@ -423,6 +421,26 @@ internal sealed class InstallerForm : Form
                 log("Update did not finish. Preserved settings and queued events; attempting to restart the existing task.");
                 RunAllowFailure("schtasks.exe","/Run","/TN",TaskName);
             }
+        }
+    }
+
+    private static void RegisterStartupTask(string executable,string configuration,Action<string> log)
+    {
+        string taskFile=Path.Combine(Path.GetTempPath(),"WatcherAgent-task-"+Guid.NewGuid().ToString("N")+".xml");
+        try
+        {
+            using(var stream=new FileStream(taskFile,FileMode.CreateNew,FileAccess.Write,FileShare.None))
+            using(var writer=new StreamWriter(stream,new UTF8Encoding(false)))
+                writer.Write(AgentTaskDefinition.Create(executable,configuration,AppDir));
+            // /F replaces old task settings as well as the action during an update.
+            // SYSTEM is explicit here and in the XML; the task runs without a user session.
+            Run("schtasks.exe","/Create","/TN",TaskName,"/XML",taskFile,"/RU","SYSTEM","/F");
+            log("Startup task allows battery power and unplugging, with no runtime limit; restarts on failure.");
+        }
+        finally
+        {
+            try { File.Delete(taskFile); }
+            catch(Exception ex) when(ex is IOException or UnauthorizedAccessException){log("Could not remove temporary task definition: "+ex.Message);}
         }
     }
 
