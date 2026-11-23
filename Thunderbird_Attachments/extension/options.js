@@ -1,0 +1,3 @@
+'use strict';const $=id=>document.getElementById(id);
+(async()=>{const s=await browser.storage.local.get(['settings','lastError','pending']);const c=s.settings||{};$('enabled').checked=!!c.enabled;$('port').value=c.port||58766;$('token').value=c.token||'';$('status').textContent=(s.lastError||'')+' Pending: '+(s.pending||0);})();
+$('settings').onsubmit=async e=>{e.preventDefault();if($('enabled').checked&&$('token').value.length<32){$('status').textContent='Token must have at least 32 characters.';return;}await browser.storage.local.set({settings:{enabled:$('enabled').checked,port:Number($('port').value),token:$('token').value}});$('status').textContent='Saved.';};

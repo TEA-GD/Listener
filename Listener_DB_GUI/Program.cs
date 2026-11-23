@@ -173,35 +173,15 @@ app.MapGet("/api/connections", (HttpRequest request, ViewerDatabase database) =>
         """, parameters);
     return Results.Ok(new { host, day, gapDays, page, size, summary, destinations });
 });
-// The mode is allowlisted before it is used to select a table or projection.
-string MailTable(HttpRequest request)=>request.Query["mode"].ToString() switch {
-    "" or "full"=>"email_alerts", "metadata"=>"email_metadata_alerts",
-    _=>throw new ArgumentException("Mail mode must be full or metadata")
-};
 app.MapGet("/api/mail",(HttpRequest request,ViewerDatabase database)=>{
     var denied=MailAccess(request);if(denied is not null)return denied;
-    string table=MailTable(request);bool metadata=table=="email_metadata_alerts";
-    int page=ParseNumber(request.Query["page"].ToString(),1,1,1000000);
-    string search=request.Query["q"].ToString();if(search.Length>200)throw new ArgumentException("Mail search must be at most 200 characters.");
+    int page=ParseNumber(request.Query["page"].ToString(),1,1,1000000);string search=request.Query["q"].ToString();if(search.Length>200)throw new ArgumentException("Search too long");
     using var db=database.Open(false);
-    if(ViewerDatabase.Query(db,"SELECT name FROM sqlite_master WHERE type='table' AND name=$table",new(){["$table"]=table}).Count==0)
-        return Results.Ok(new{available=false,total=0,page,size=50,alerts=Array.Empty<object>()});
-    string where=search.Length==0?"":" WHERE (instr(lower(sender),lower($q))>0 OR instr(lower(recipients_json),lower($q))>0 OR instr(lower(client_label),lower($q))>0 OR instr(lower(attachment_names_json),lower($q))>0"+(metadata?"": " OR instr(lower(subject),lower($q))>0")+")";
-    var args=new Dictionary<string,object>();if(search.Length>0)args["$q"]=search;
-    var total=ViewerDatabase.Query(db,"SELECT COUNT(*) AS total FROM "+table+where,args)[0]["total"];
-    args["$limit"]=50;args["$offset"]=(page-1)*50;
-    string columns=metadata?"alert_id,client_label,sender,recipients_json,attachment_names_json,has_attachments,message_date_utc,received_utc":"alert_id,client_label,sender,sender_domain,subject,recipients_json,attachment_names_json,body_status,message_date_utc,received_utc";
-    var alerts=ViewerDatabase.Query(db,"SELECT "+columns+" FROM "+table+where+" ORDER BY received_utc DESC,alert_id LIMIT $limit OFFSET $offset",args);
-    return Results.Ok(new{available=true,total,page,size=50,alerts});
-});
-app.MapGet("/api/mail/{id}",(string id,HttpRequest request,ViewerDatabase database)=>{
-    var denied=MailAccess(request);if(denied is not null)return denied;
-    string table=MailTable(request);
-    if(!Guid.TryParseExact(id,"D",out _))return Results.BadRequest(new{error="Invalid mail alert ID"});
-    using var db=database.Open(false);
-    if(ViewerDatabase.Query(db,"SELECT name FROM sqlite_master WHERE type='table' AND name=$table",new(){["$table"]=table}).Count==0)return Results.NotFound(new{error="Mail receiver has not initialized this database"});
-    var rows=ViewerDatabase.Query(db,"SELECT * FROM "+table+" WHERE alert_id=$id",new(){["$id"]=id});
-    return rows.Count==0?Results.NotFound(new{error="Mail alert not found"}):Results.Ok(rows[0]);
+    if(ViewerDatabase.Query(db,"SELECT 1 FROM sqlite_master WHERE name='mail_information'").Count==0)return Results.Ok(new {available=false,total=0,page,size=50,alerts=Array.Empty<object>()});
+    var args=new Dictionary<string,object>{{"$q",search},{"$limit",50},{"$offset",(page-1)*50}};
+    string where=" WHERE instr(lower(sender||recipients_json||host||attachments_json),lower($q))>0";
+    var total=ViewerDatabase.Query(db,"SELECT count(*) AS total FROM mail_information"+where,args)[0]["total"];
+    return Results.Ok(new {available=true,total,page,size=50,alerts=ViewerDatabase.Query(db,"SELECT * FROM mail_information"+where+" ORDER BY collected_utc DESC,alert_id LIMIT $limit OFFSET $offset",args)});
 });
 IResult? MailAccess(HttpRequest request){
     if(mailViewToken.Length==0)return Results.Json(new{error="Mail viewing is disabled. Configure LISTENER_MAIL_VIEW_TOKEN or LISTENER_MAIL_VIEW_TOKEN_FILE on the dashboard server."},statusCode:403);

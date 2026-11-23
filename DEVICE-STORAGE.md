@@ -9,11 +9,11 @@ Update the Collector before deploying categorized agents. Stop it and make a con
 | User PCs | `user_pcs` | `events_user_pcs` |
 | Project Stands | `project_stands` | `events_project_stands` |
 | Existing unclassified data / old agents | missing field or `legacy` | `events_legacy` |
-| Mail alerts | selected mail receiver | `email_alerts` / `email_metadata_alerts` |
+| Attachment mail | local Agent → Collector | `mail_information` |
 
 The Windows installer asks for **Device type**. The PowerShell registration helper prompts or accepts `-DeviceCategory`; the Linux package prompts or accepts `WATCHER_DEVICE_CATEGORY` for unattended installation. Saved selections survive updates. The agent configuration field is `device_category`. Restart an agent after editing its configuration.
 
-Device role is selected explicitly, rather than inferred from its operating system. Mail receivers route mail independently of agent device type. The metadata receiver continues storing only date, sender, recipients, attachment flag and filenames, with delivery identifiers; categorizing connection events does not enable message-body collection.
+Device role is selected explicitly, rather than inferred from its operating system. The single attachment-only Thunderbird add-on routes metadata through the local compiled Agent to the Collector. No subject or body is collected.
 
 Existing rows are preserved in `events_legacy`; installing a categorized agent routes future records to the selected table. Historical records and already spooled events are not reassigned. Old agents keep working without configuration changes.
 

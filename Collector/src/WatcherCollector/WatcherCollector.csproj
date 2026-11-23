@@ -18,4 +18,5 @@
 <ItemGroup><Compile Include="../../../Shared/DeviceCategories.cs" Link="DeviceCategories.cs" /></ItemGroup>
 <ItemGroup><Compile Include="../../../Shared/GuiReadModel.cs" Link="GuiReadModel.cs" /></ItemGroup>
 <ItemGroup><Compile Include="../../../Shared/NetworkContextSchema.cs" Link="NetworkContextSchema.cs" /></ItemGroup>
+<ItemGroup><Compile Include="../../../Shared/MailPayload.cs" Link="MailPayload.cs" /></ItemGroup>
 </Project>

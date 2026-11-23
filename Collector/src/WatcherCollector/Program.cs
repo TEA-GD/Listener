@@ -425,7 +425,7 @@ internal static class Database
         string timestamp = Required(row, "TIMESTAMP_UTC");
         if (host is "." or ".." || !SafeHost.IsMatch(host)) throw new ArgumentException("Invalid MONITORED_HOST");
         if (!Guid.TryParseExact(eventId, "D", out _)) throw new ArgumentException("Invalid EVENT_ID GUID");
-        if (!EventTypes.Contains(eventType) && eventType is not ("NETWORK_CONTEXT" or "PROCESS_CONTEXT" or "CONTEXT_COMPLETE")) throw new ArgumentException("Invalid EVENT_TYPE");
+        if (!EventTypes.Contains(eventType) && eventType is not ("NETWORK_CONTEXT" or "PROCESS_CONTEXT" or "CONTEXT_COMPLETE" or "MAIL_ATTACHMENT")) throw new ArgumentException("Invalid EVENT_TYPE");
         if (eventType.StartsWith("UDP_", StringComparison.Ordinal) &&
             (Required(row, "PROTOCOL") != "UDP" || !int.TryParse(Required(row, "SOURCE_PORT"), out int localPort) || localPort is < 1 or > 65535))
             throw new ArgumentException("UDP endpoint events require PROTOCOL UDP and a valid SOURCE_PORT");
@@ -446,6 +446,11 @@ internal static class Database
         registry.Parameters.AddWithValue("$id", eventId);
         registry.Parameters.AddWithValue("$category", category);
         if (registry.ExecuteNonQuery() == 0) { transaction.Commit(); return eventId; }
+        if(eventType=="MAIL_ATTACHMENT"){
+            var mail=WatcherShared.MailPayload.Parse(row.GetProperty("MAIL_JSON").GetString()!);
+            if(mail.alert_id!=eventId)throw new ArgumentException("Mail ID must match event ID");
+            MailDatabaseSchema.Store(db,transaction,mail,host);transaction.Commit();return eventId;
+        }
         if(eventType is "NETWORK_CONTEXT" or "PROCESS_CONTEXT" or "CONTEXT_COMPLETE"){
             NetworkContextSchema.Store(db,transaction,row,host,timestamp,eventType);transaction.Commit();return eventId;
         }

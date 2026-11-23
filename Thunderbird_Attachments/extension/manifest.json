@@ -1,11 +1,11 @@
 {
   "manifest_version": 2,
-  "name": "Listener Mail Metadata Only",
-  "version": "1.0.1",
-  "description": "Report only date, sender, recipients and attachment names; no subjects or message bodies.",
+  "name": "Listener Attachment Mail",
+  "version": "1.0.0",
+  "description": "Report attachment-only arrival metadata through the local Listener Agent; no subject, body or attachment contents.",
   "browser_specific_settings": {
     "gecko": {
-      "id": "listener-mail-metadata@tea-gd.local",
+      "id": "listener-mail-attachments@tea-gd.local",
       "strict_min_version": "140.0"
     }
   },
@@ -14,11 +14,8 @@
     "messagesRead",
     "storage",
     "unlimitedStorage",
-    "alarms"
-  ],
-  "optional_permissions": [
-    "http://*/*",
-    "https://*/*"
+    "alarms",
+    "http://127.0.0.1/*"
   ],
   "background": {
     "scripts": [
@@ -32,6 +29,6 @@
     "open_in_tab": true
   },
   "browser_action": {
-    "default_title": "Listener mail alert settings"
+    "default_title": "Attachment mail settings"
   }
 }

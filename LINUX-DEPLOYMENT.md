@@ -1,6 +1,6 @@
 # Install and uninstall Listener on Linux servers
 
-Use this procedure for **Debian 12 or Debian 13 on amd64 with systemd**. Install the Collector first, then the Agents. The Collector receives events on TCP 6515; each Agent monitors its own machine. Both can run on the same server. The GUI and mail receivers are separate components.
+Use this procedure for **Debian 12 or Debian 13 on amd64 with systemd**. Install the Collector first, then the Agents. The Collector receives events on TCP 6515; each Agent monitors its own machine. Both can run on the same server. The GUI and the Thunderbird add-on are separate components; mail uses the compiled Agent loopback bridge.
 
 The Agent has a Debian package. The Collector uses a self-contained Linux build and the systemd unit supplied in `Collector/linux/`; there is no Collector `.deb`. The opt-in Linux build leaves the normal Windows build unchanged. Ubuntu, RHEL and ARM package installation is not covered by these steps.
 
@@ -118,7 +118,7 @@ sudo ss -ltnp 'sport = :6515'
 
 Expect `CONFIG OK`, then an active service and a `STARTED PLAIN TCP` log entry. `--check-config` also creates/migrates the database; it does not start the listener or check firewall reachability. The service runs as the dedicated account. Its writable bundle-extraction directory is inside its state directory, so it does not depend on access to a home directory.
 
-The current GUI reads SQLite directly. A GUI installed on another machine will not automatically see this Linux database. Run it alongside the database with the correct `WATCHER_DB_PATH` and read permissions, or use an appropriate separate data-access architecture; do not share a live SQLite file over a network filesystem as a substitute for deployment planning. This guide does not automatically move an existing Windows database or install the GUI/mail receivers.
+The current GUI reads SQLite directly. A GUI installed on another machine will not automatically see this Linux database. Run it alongside the database with the correct `WATCHER_DB_PATH` and read permissions, or use an appropriate separate data-access architecture; do not share a live SQLite file over a network filesystem as a substitute for deployment planning. This guide does not automatically move an existing Windows database or install the GUI/Thunderbird add-on.
 
 ## 4 Build and install an Agent on each Linux device
 
@@ -268,4 +268,4 @@ sudo rm -rf -- /etc/watcher-collector /var/lib/watcher-collector /var/log/watche
 sudo userdel watcher-collector
 ```
 
-Do not remove the account if another component was configured to use it. These commands do not uninstall the separately managed GUI/mail receivers or erase copies/backups stored elsewhere.
+Do not remove the account if another component was configured to use it. These commands do not uninstall the separately managed GUI/Thunderbird add-on or erase copies/backups stored elsewhere.

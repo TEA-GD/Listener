@@ -126,16 +126,6 @@ data deletion, agent downtime, long-lived connections between snapshots, and
 incorrect endpoint clocks can affect classifications. No persistent alert state
 or database writes are created; results are recomputed on refresh.
 
-## External mail alerts
-
-The header's **Mail alerts** link opens `/mail.html` for Thunderbird alerts stored
-by [Listener_MailReceiver](../Listener_MailReceiver/README.md). The mail table is
-optional; TCP views continue to work without it. Email APIs are disabled by
-default. Configure `LISTENER_MAIL_VIEW_TOKEN` or a protected
-`LISTENER_MAIL_VIEW_TOKEN_FILE` (key length at least 32 characters), then enter that
-key in the mail page. `Start-Windows.ps1 -MailViewKeyFile <path>` selects a file.
-Use a separate read key from the receiver's write key and trusted HTTPS for
-remote access. Bodies/HTML sources/filenames render as inert plain text.
 
 ## UDP events
 
@@ -145,11 +135,6 @@ on the New & rare connections board; peerless bindings cannot. UDP endpoint
 counts are event counts, not live sockets or packet counts. See
 [UDP behavior and upgrade order](../Agent/UDP.md).
 
-## Full-text and metadata-only mail
-
-Open `/mail.html`, enter the separate mail viewing key, and select **Full-text mail** or **Metadata only** in **Mail variant**. Metadata mode shows date, sender, receivers, attachment presence and filenames, without a message-text section. Both modes support search, paging and details. Receiver endpoints remain separate: ports 6516 (full text) and 6517 (metadata only).
-
-The Collector and both receivers initialize `email_alerts` and `email_metadata_alerts` in the same database by default. The dashboard remains read-only and does not initialize tables. Mail viewing also works before the Collector has created the connection tables; connection pages require starting the Collector. See [mail receiver setup](../Listener_MailReceiver/README.md#mail-dashboard-key) for a protected viewing key and `-MailViewKeyFile`.
 
 ## Device overview: rate, addresses and current reported connections
 
@@ -204,7 +189,7 @@ For scripted startup, bypass the dialog by calling PowerShell directly, or pass 
 .\Start-Windows.ps1 -AccessMode Domain -Port 5080 -ConfigureFirewall
 
 # Custom database and optional mail viewing key:
-.\Start-Windows.ps1 -AccessMode Domain -DatabasePath 'D:\Watcher\watcher-events.db' -MailViewKeyFile 'C:\ProgramData\WatcherMailReceiver\mail-view.key'
+.\Start-Windows.ps1 -AccessMode Domain -DatabasePath 'D:\Watcher\watcher-events.db' -MailViewKeyFile 'C:\ProgramData\WatcherCollector\mail-view.key'
 ```
 
 On a client PC, test the server URL/port if access fails:
@@ -319,3 +304,7 @@ A smaller network strip appears below each day's working-time graph. It uses the
 The device card also has **It's time to analyze** beside **Show online graph**. It opens `analyze.html?host=...`, an intentionally empty page reserved for future analysis.
 
 Rebuild/restart only the GUI and reload the browser. No new Collector/agent update or schema change is required. Network strips need samples collected by the previous network-context update; older history stays grey where no such evidence exists.
+
+## Attachment mail information
+
+The Mail alerts page now reads only `mail_information`, showing observed receipt date, device, sender, recipients, attachment count and names/formats/sizes. No message body or variant selector remains. The existing separate GUI viewing-key configuration is retained. See [the new add-on and migration guide](../Thunderbird_Attachments/README.md).

@@ -4,6 +4,8 @@ namespace WatcherAgent;
 
 internal sealed class AgentConfig
 {
+    public string mail_token { get; set; } = "";
+    public int mail_port { get; set; } = 58766;
     public string device_category { get; set; } = "legacy";
     public string agent_id { get; set; } = "";
     public string spool_dir { get; set; } = "";

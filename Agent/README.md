@@ -70,3 +70,7 @@ The first ordinary event requests pipeline support. An updated Collector acknowl
 The sender still limits each pass to 1,000 files and yields to collection after roughly five seconds between groups; the current group can take longer according to existing timeouts. This removes the one-network-round-trip-per-record bottleneck on VPNs without suspending monitoring to drain the entire backlog. Network/process snapshot cadence and contents are preserved.
 
 After upgrading, check the pending count several times over a few minutes. Expect brief increases when minute snapshots are queued, with an overall downward trend while catching up. Actual throughput still depends on VPN bandwidth, Collector disk/commit speed and event production. Do not delete queued files or reinstall to clear the backlog. The 50,000-event spool limit remains in effect.
+
+## Local attachment mail bridge
+
+The compiled Agent now optionally accepts attachment-only Thunderbird metadata on loopback HTTP, then forwards it through the same durable spool/Collector ACK path. Configure `mail_token` (at least 32 characters) and optionally `mail_port` (default 58766); an empty token disables the endpoint. Keep the spool when updating. See [single add-on setup and destructive legacy-mail migration](../Thunderbird_Attachments/README.md). No message subjects, bodies or attachment contents are accepted. The separate PowerShell ServerAgent does not provide this endpoint.

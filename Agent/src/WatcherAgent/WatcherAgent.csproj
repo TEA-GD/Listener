@@ -12,4 +12,5 @@
   </PropertyGroup>
 <ItemGroup><Compile Include="../../../Shared/DeviceCategories.cs" Link="DeviceCategories.cs" /></ItemGroup>
 <ItemGroup><EmbeddedResource Include="../../../Shared/NetworkContext.ps1" LogicalName="Watcher.NetworkContext.ps1" /></ItemGroup>
+<ItemGroup><Compile Include="../../../Shared/MailPayload.cs" Link="MailPayload.cs" /></ItemGroup>
 </Project>

@@ -1,6 +1,6 @@
 # Watcher — TCP/UDP socket monitoring with a TCP collector
 
-**Current architecture and deployment scheme:** [SCHEME.md](SCHEME.md) — components, ports, database tables, snapshots, mail variants and local/domain GUI access.
+**Current architecture and deployment scheme:** [SCHEME.md](SCHEME.md) — components, ports, database tables, snapshots, attachment-only mail and local/domain GUI access.
 
 **Linux servers:** [Collector and Agent installation, upgrades and uninstall](LINUX-DEPLOYMENT.md) — Debian 12/13 amd64, native Collector build, systemd, configuration and data-preserving removal.
 
@@ -10,24 +10,15 @@ Update the Collector and GUI together for maintained device summaries, indexed h
 
 ## Device categories
 
-The agent installer asks for **Linux servers, Windows servers, User PCs, or Project Stands**. The Collector stores each category in its own table, while the GUI and Analyzer retain unified history. Mail alerts keep their dedicated tables. **Update the Collector first**, then rebuild/update agents. Existing data is preserved as unclassified. See [installation choices and migration](DEVICE-STORAGE.md).
+The agent installer asks for **Linux servers, Windows servers, User PCs, or Project Stands**. The Collector stores each category in its own table, while the GUI and Analyzer retain unified history. Attachment mail uses its dedicated `mail_information` table. **Update the Collector first**, then rebuild/update agents. Existing data is preserved as unclassified. See [installation choices and migration](DEVICE-STORAGE.md).
 
-## Integrated mail database and add-ons
+## Attachment only mail
 
-The updated Collector and both mail receivers automatically initialize **`email_alerts`** (full text) and **`email_metadata_alerts`** (date, sender, receiver, attachment flag and filenames). Initialization preserves existing data. All three default to `%ProgramData%\WatcherCollector\watcher-events.db`; set the same custom database path on all components if overriding it. The dashboard remains read-only.
+There is one Thunderbird add-on: [Listener Attachment Mail](Thunderbird_Attachments/README.md). Only messages with attachments produce reports: observed receipt date, sender, recipients, attachment count, names, formats and sizes. No subject, body or attachment contents are collected.
 
-- [Full-text Thunderbird add-on](Thunderbird_Addon/README.md) → [receiver on port 6516](Listener_MailReceiver/README.md).
-- [Metadata-only Thunderbird add-on](Thunderbird_Addon_Metadata/README.md) → [receiver on port 6517](Listener_MailReceiver_Metadata/README.md).
-- [Dashboard](Listener_DB_GUI/README.md): open **Mail alerts**, enter the viewing key and choose the mail variant.
+Mail goes to the local compiled Agent, then through its spool to the Collector and the single `mail_information` table. Old add-ons and standalone receivers have been removed from this repository. Follow the [migration and setup instructions](Thunderbird_Attachments/README.md#replace-old-installations) before upgrading: the Collector converts attachment metadata and drops the two legacy mail tables. Connection history is preserved.
 
-Use receiver `Start-Windows.ps1 -InitializeKey -InternalDomains 'your-domain.example'` for first-time protected key setup. Existing keys are retained on updates. Keep the repository layout when building from source; shared code lives in `Shared/`.
-
-Run `Build-Windows-All.bat` with .NET 10 SDK and Python 3 to build Collector/Agent installers, Analyzer, dashboard, both receivers and both version 1.0.1 Thunderbird packages. Actual Windows installation and Thunderbird policy deployment must be verified on a test PC.
-
-**Upgrade:** back up existing databases before updating and stop database writers before a filesystem backup. Rebuild/restart Collector, receivers and dashboard to apply the shared schema. The previous metadata receiver defaulted to a standalone database; see its README to retain that path/history. Use only the metadata-only add-on if message text must not be collected.
-
-
-**No authentication tokens. No TLS certificates. No private/public keys. No Python needed for the installed C# programs.**
+`Build-Windows-All.bat` builds the Collector/Agent installers, Analyzer, GUI and the one attachment-only XPI. The local mail endpoint and GUI mail viewer require separate access keys; connection forwarding remains plain TCP without enrollment tokens.
 
 This is a change to the **network protocol**, not just a fix to a certificate-loading flag. You MUST replace **both** the collector and every participating agent. An old TLS agent cannot talk to a plaintext collector, or vice versa.
 
@@ -61,7 +52,7 @@ An absent task/service and two `False` results indicate the installed components
 - `Collector/build/build-windows.ps1` — publishes a self-contained collector EXE, then embeds it in a self-contained GUI installer EXE.
 - `Agent/build/build-windows.ps1` — builds a self-contained GUI agent installer embedding the agent EXE.
 - `Agent/build/build-linux.sh` — creates a Debian 12/13 amd64 `.deb` (requires .NET 10 SDK, `dpkg-deb`).
-- `build-windows-all.ps1` — builds both Windows installers, Analyzer, GUI and launchers, both mail receivers, and both Thunderbird packages.
+- `build-windows-all.ps1` — builds both Windows installers, Analyzer, GUI and launchers, and the single attachment-mail package.
 
 The source compiles with the .NET 10 SDK on Windows. The collector uses NuGet packages `Microsoft.Data.Sqlite` and `Microsoft.Extensions.Hosting.WindowsServices` for storage and service hosting. NuGet access (or configured offline cache) is needed at build time, but the published executables include the .NET runtime.
 
@@ -309,15 +300,9 @@ process/port combinations. Alerts go to a configured JSON-lines file (local or
 a domain share), backed by a persistent retry outbox. The collector database is
 read-only; profiles and delivery state live in a separate local database.
 
-## Thunderbird external-mail alerts
+## Thunderbird attachment mail
 
-[Thunderbird_Addon](Thunderbird_Addon/README.md) reports newly received mail from
-outside configured domains, for explicitly selected accounts. Alerts include
-sender/recipients, available decoded message text, attachment names and body
-availability. [Listener_MailReceiver](Listener_MailReceiver/README.md) authenticates
-and stores these in the collector DB's separate `email_alerts` table. The updated
-GUI has **Mail alerts**, protected by a separate mail-viewing key. Mail collection
-is disabled until configured; TCP agents and connection analysis are unchanged.
+See the [single add-on, Agent bridge and migration guide](Thunderbird_Attachments/README.md).
 
 ## UDP monitoring
 

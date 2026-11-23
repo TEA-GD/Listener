@@ -98,8 +98,8 @@ internal static class DatabaseIntegration
         }
         Database.Initialize(path);
         Database.Initialize(path);
-        cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('email_alerts','email_metadata_alerts')";
-        Check((long)cmd.ExecuteScalar()! == 2, "Collector did not initialize both mail tables");
+        cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='mail_information'";
+        Check((long)cmd.ExecuteScalar()! == 1, "Collector did not initialize mail_information");
         if (legacy) { cmd.CommandText="SELECT rowid FROM events"; Check((long)cmd.ExecuteScalar()! == 42,"Migration changed Analyzer checkpoint rowid"); }
         // Verify all migrated values, or all newly stored values, independently.
         if (!legacy)

@@ -68,6 +68,7 @@ internal static class Program
             cfg.ValidateCollector();
             Directory.CreateDirectory(cfg.spool_dir);
             Console.WriteLine($"WatcherAgent {cfg.agent_id} -> {cfg.collector_host}:{cfg.collector_port}");
+            using var mailBridge=new MailBridge(cfg,rows=>QueueBatch(cfg.spool_dir,rows));
             Run(cfg, once);
             return 0;
         }
@@ -291,7 +292,12 @@ internal static class Program
         return rows;
     }
 
+    private static readonly object SpoolGate=new();
     private static void QueueBatch(string dir, List<Dictionary<string, string>> events)
+    {
+        lock(SpoolGate)QueueBatchLocked(dir,events);
+    }
+    private static void QueueBatchLocked(string dir,List<Dictionary<string,string>> events)
     {
         int pending = Directory.EnumerateFiles(dir, "*.json").Count();
         if (pending + events.Count > CollectorSettings.MaxSpoolEvents)
