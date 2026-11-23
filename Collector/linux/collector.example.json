@@ -1,0 +1,10 @@
+{
+  "bind_host": "0.0.0.0",
+  "bind_port": 6515,
+  "database_path": "/var/lib/watcher-collector/watcher-events.db",
+  "csv_dir": "/var/lib/watcher-collector/csv",
+  "log_file": "/var/log/watcher-collector/collector.log",
+  "csv_export_seconds": 10,
+  "max_clients": 64,
+  "allowed_client_cidrs": ["127.0.0.1/32", "192.168.10.0/24", "10.8.0.0/24"]
+}

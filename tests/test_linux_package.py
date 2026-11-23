@@ -22,6 +22,7 @@ class LinuxPackage(unittest.TestCase):
                 self.assertEqual(0o755,(tree/relative).stat().st_mode & 0o777,relative)
             service=(tree/'lib/systemd/system/watcher-agent.service').read_text()
             self.assertIn('ExecStart=/usr/bin/watcher-agent --config /etc/watcher-agent/agent.json',service)
+            self.assertIn('Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/var/lib/watcher-agent/.net',service)
             self.assertTrue(os.access(tree/'usr/bin/watcher-agent',os.X_OK))
             for script in ['postinst','prerm','postrm']:
                 subprocess.run(['sh','-n',str(tree/'DEBIAN'/script)],check=True)

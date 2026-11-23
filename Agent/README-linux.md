@@ -5,6 +5,8 @@ The package builder targets the Debian release on the build machine. Build on
 releases and architectures before publishing. Ubuntu/RHEL/ARM packaging is not
 provided by this script.
 
+For Collector installation, complete Agent configuration, upgrades and uninstall, see [Linux server deployment](../LINUX-DEPLOYMENT.md).
+
 ## Correcting the libicu72 installation error
 
 Version 1.0.0 was hard-coded for Debian 12. On Debian 13 the ICU/OpenSSL packages
@@ -41,8 +43,8 @@ dpkg-deb -f Agent/output/watcher-agent_1.0.3_amd64.deb Version Depends
 sudo apt install ./Agent/output/watcher-agent_1.0.3_amd64.deb
 ```
 
-APT installs the declared dependencies from your configured repositories. If it
-fails, the systemd unit is not installed: resolve the package error first.
+APT installs the declared dependencies from your configured repositories. If APT reports dependency or configuration errors, resolve them before starting
+the service.
 
 Edit the collector destination, preserving any existing identity/spool settings:
 
@@ -102,3 +104,14 @@ sudo env WATCHER_DEVICE_CATEGORY=linux_servers apt install ./Agent/output/watche
 ```
 
 A saved category is preserved on upgrade. To change it later, edit `device_category` in `/etc/watcher-agent/agent.json` and restart `watcher-agent`. Already queued events retain their original category. Update the Collector first; see [device storage](../DEVICE-STORAGE.md).
+
+## Uninstall while keeping unsent data
+
+```bash
+sudo systemctl stop watcher-agent.service
+sudo apt remove watcher-agent
+```
+
+This keeps `/etc/watcher-agent/agent.json` and `/var/lib/watcher-agent/spool`. `apt purge watcher-agent` removes the main config but still retains the spool. Full data deletion is a separate irreversible action; see [the complete removal procedure](../LINUX-DEPLOYMENT.md#7-uninstall-the-agent-and-retain-its-data).
+
+For an upgrade from rebuilt source with the same package version, use `sudo env WATCHER_DEVICE_CATEGORY=linux_servers apt install --reinstall ./Agent/output/watcher-agent_1.0.3_amd64.deb`. The unit now uses `/var/lib/watcher-agent/.net` for single-file bundle extraction, within its writable state area.

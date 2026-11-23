@@ -289,3 +289,7 @@ The GUI defaults to three days with configurable rows per page and a selected da
 ## VPN upload pipelining
 
 The first event may include `request_pipeline: true`. Only after durable storage does an updated Collector respond with `ACK <id> PIPELINE64`. Agents then send at most 64 events or 128 KiB in flight, using the existing per-event ACKs for file deletion. Legacy peers retain sequential behavior. Collector read-ahead and ACK writes use separate stream paths to support queued input safely. No database schema change is needed. See [deployment and backlog verification](Agent/README.md#vpn-backlog-pipelined-delivery).
+
+## Linux server deployment
+
+The Collector has an opt-in `BuildForLinux=true` self-contained amd64 publish and a dedicated-user systemd unit. The Agent uses its Debian 12/13 amd64 package and root systemd unit. Both single-file services use writable extraction paths inside their data directories. Default uninstall instructions preserve the database or unsent spool; full data deletion is separate. See [Linux deployment and removal](LINUX-DEPLOYMENT.md).

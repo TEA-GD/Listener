@@ -2,6 +2,8 @@
 
 **Current architecture and deployment scheme:** [SCHEME.md](SCHEME.md) — components, ports, database tables, snapshots, mail variants and local/domain GUI access.
 
+**Linux servers:** [Collector and Agent installation, upgrades and uninstall](LINUX-DEPLOYMENT.md) — Debian 12/13 amd64, native Collector build, systemd, configuration and data-preserving removal.
+
 ## GUI performance
 
 Update the Collector and GUI together for maintained device summaries, indexed heartbeat history and lighter page loading. Existing data is preserved. See [deployment steps and measured query improvements](Listener_DB_GUI/PERFORMANCE.md).
@@ -168,7 +170,7 @@ cd Agent
 The package will be written to `Agent/output/watcher-agent_1.0.3_amd64.deb`. On the target Linux machine:
 
 ```bash
-sudo apt install ./watcher-agent_1.0.3_amd64.deb
+sudo env WATCHER_DEVICE_CATEGORY=linux_servers apt install ./watcher-agent_1.0.3_amd64.deb
 sudo systemctl status watcher-agent
 sudo journalctl -u watcher-agent -n 50 --no-pager
 ```
