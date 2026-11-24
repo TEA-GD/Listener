@@ -20,6 +20,7 @@ internal static class DatabaseIntegration
         {
             foreach (bool legacy in new[] { false, true }) Test(root, legacy);
             TestPartitions(root);
+            TestDirectionUpgrade(root);
             TestRollback(root);
             TestUdpStorage(root);
             TestListener(root).GetAwaiter().GetResult();
@@ -30,6 +31,33 @@ internal static class DatabaseIntegration
             SqliteConnection.ClearAllPools();
             Directory.Delete(root, true);
         }
+    }
+
+    private static void TestDirectionUpgrade(string root)
+    {
+        string path = Path.Combine(root, "direction-upgrade.db");
+        Database.Initialize(path);
+        string id = Guid.NewGuid().ToString();
+        var row = new Dictionary<string,string> { ["EVENT_ID"] = id, ["MONITORED_HOST"] = "direction-test", ["EVENT_TYPE"] = "TCP_CONNECTED", ["TIMESTAMP_UTC"] = "2026-11-20T10:00:00Z", ["DEVICE_CATEGORY"] = "user_pcs" };
+        using (var envelope = JsonDocument.Parse(JsonSerializer.Serialize(new { @event = row }))) Database.Store(path, envelope.RootElement, "127.0.0.1");
+        using var db = new SqliteConnection("Data Source=" + path); db.Open();
+        using var c = db.CreateCommand(); c.CommandText = "SELECT rowid FROM events WHERE EVENT_ID='" + id + "'";
+        long sequence = (long)c.ExecuteScalar()!;
+        c.CommandText = "DROP VIEW events"; c.ExecuteNonQuery();
+        var categories = new[] { "legacy", "linux_servers", "windows_servers", "user_pcs", "project_stands" };
+        foreach (string category in categories) foreach (string field in new[] { "CONNECTION_DIRECTION", "DIRECTION_BASIS" })
+        { c.CommandText = $"ALTER TABLE events_{category} DROP COLUMN [{field}]"; c.ExecuteNonQuery(); }
+        var oldFields = Database.CsvFields.Where(f => f is not ("CONNECTION_DIRECTION" or "DIRECTION_BASIS"));
+        c.CommandText = "CREATE VIEW events AS " + string.Join(" UNION ALL ", categories.Select(category =>
+            "SELECT i.sequence AS rowid," + string.Join(',', oldFields.Select(f => $"e.[{f}]")) + $",e.host,e.date_utc,e.received_utc,i.device_category AS DEVICE_CATEGORY FROM events_{category} e JOIN event_registry i ON e.EVENT_ID=i.event_id AND i.device_category='{category}'"));
+        c.ExecuteNonQuery();
+        Database.Initialize(path); Database.Initialize(path);
+        c.CommandText = "SELECT rowid,CONNECTION_DIRECTION,DIRECTION_BASIS FROM events WHERE EVENT_ID='" + id + "'";
+        using (var reader = c.ExecuteReader()) { Check(reader.Read() && reader.GetInt64(0) == sequence && reader.GetString(1) == "" && reader.GetString(2) == "", "Direction upgrade changed historical rows or global IDs"); }
+        row["EVENT_ID"] = Guid.NewGuid().ToString(); row["CONNECTION_DIRECTION"] = "incoming"; row["DIRECTION_BASIS"] = "local_listener";
+        using (var envelope = JsonDocument.Parse(JsonSerializer.Serialize(new { @event = row }))) Database.Store(path, envelope.RootElement, "127.0.0.1");
+        c.CommandText = "SELECT COUNT(*) FROM events WHERE CONNECTION_DIRECTION='incoming' AND DIRECTION_BASIS='local_listener'";
+        Check((long)c.ExecuteScalar()! == 1, "Collector dropped direction evidence");
     }
 
     private static void TestPartitions(string root)

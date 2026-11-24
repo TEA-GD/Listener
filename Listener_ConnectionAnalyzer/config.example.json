@@ -1,0 +1,6 @@
+{
+  "database_path": "C:\\ProgramData\\WatcherCollector\\watcher-events.db",
+  "analysis_database": "C:\\ProgramData\\WatcherConnectionAnalyzer\\connection-analysis.db",
+  "poll_seconds": 5,
+  "batch_size": 1000
+}

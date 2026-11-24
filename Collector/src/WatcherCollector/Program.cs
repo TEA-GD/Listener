@@ -295,7 +295,7 @@ internal static class Database
         "DATE_AND_TIME", "SOURCE_IP", "SOURCE_DOMAIN_NAME", "PROCESS_NAME", "PROCESS_ID",
         "RECIEVER_IP", "RECIEVER_DOMAINNAME", "PORT_USED", "SOFTWARE_THAT_USED", "SOURCE_PORT",
         "PROTOCOL", "STATE", "OPERATING_SYSTEM", "MONITORED_HOST", "SNAPSHOT_ID",
-        "EVENT_TYPE", "EVENT_ID", "TIMESTAMP_UTC", "COLLECTOR_PEER_IP"
+        "EVENT_TYPE", "EVENT_ID", "TIMESTAMP_UTC", "COLLECTOR_PEER_IP", "CONNECTION_DIRECTION", "DIRECTION_BASIS"
     };
     private static readonly Regex SafeHost = new(@"^[A-Za-z0-9_.-]{1,120}$", RegexOptions.Compiled);
     private static readonly HashSet<string> EventTypes = new(StringComparer.Ordinal) {
@@ -395,13 +395,19 @@ internal static class Database
                 $"CREATE INDEX IF NOT EXISTS idx_{table}_time ON {table}(host,TIMESTAMP_UTC DESC,EVENT_ID);" +
                 $"CREATE INDEX IF NOT EXISTS idx_{table}_event_time ON {table}(host,julianday(TIMESTAMP_UTC) DESC,EVENT_ID DESC);";
             c.ExecuteNonQuery();
+            c.CommandText = $"PRAGMA table_info({table})";
+            var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using (var schema = c.ExecuteReader()) while (schema.Read()) columns.Add(schema.GetString(1));
+            foreach (string field in new[] { "CONNECTION_DIRECTION", "DIRECTION_BASIS" })
+                if (!columns.Contains(field)) { c.CommandText = $"ALTER TABLE {table} ADD COLUMN [{field}] TEXT NOT NULL DEFAULT ''"; c.ExecuteNonQuery(); }
         }
         if (migrate)
         {
             c.CommandText = "INSERT INTO event_registry(sequence,event_id,device_category) SELECT rowid,EVENT_ID,'legacy' FROM events_legacy ORDER BY rowid";
             c.ExecuteNonQuery();
         }
-        c.CommandText = "CREATE VIEW IF NOT EXISTS events AS " + string.Join(" UNION ALL ", categories.Select(category =>
+        c.CommandText = "DROP VIEW IF EXISTS events"; c.ExecuteNonQuery();
+        c.CommandText = "CREATE VIEW events AS " + string.Join(" UNION ALL ", categories.Select(category =>
             "SELECT i.sequence AS rowid," + string.Join(",", CsvFields.Select(f => $"e.[{f}]")) +
             $",e.host,e.date_utc,e.received_utc,i.device_category AS DEVICE_CATEGORY FROM events_{category} e JOIN event_registry i ON i.event_id=e.EVENT_ID AND i.device_category='{category}'"));
         c.ExecuteNonQuery();

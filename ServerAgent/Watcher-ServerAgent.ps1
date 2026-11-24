@@ -51,9 +51,20 @@ function Get-ConnectionSnapshot([bool]$CollectUdp=$true) {
         # Windows reports an empty CIM query as ObjectNotFound on some versions.
         if ($_.FullyQualifiedErrorId -notlike 'CmdletizationQuery_NotFound*') { throw }
     }
+    $listeners=@();$listenKnown=$true
+    try { $listeners=@(Get-NetTCPConnection -State Listen -ErrorAction Stop) }
+    catch { if ($_.FullyQualifiedErrorId -notlike 'CmdletizationQuery_NotFound*') { $listenKnown=$false } }
     $sockets | ForEach-Object {
         $row = $_
         if ($row.RemoteAddress -in @('127.0.0.1','::1','') -or [string]::IsNullOrEmpty($row.LocalAddress)) { return }
+        $direction='unknown';$basis='unavailable'
+        if($listenKnown){
+            $matching=@($listeners | Where-Object {
+                $_.LocalPort -eq $row.LocalPort -and ($_.LocalAddress -eq $row.LocalAddress -or $_.LocalAddress -eq '0.0.0.0' -or $_.LocalAddress -eq '::') -and
+                ($_.OwningProcess -eq $row.OwningProcess -or $_.OwningProcess -eq 0 -or $row.OwningProcess -eq 0)
+            })
+            if($matching.Count){$direction='incoming';$basis='local_listener'}else{$direction='outgoing';$basis='no_local_listener'}
+        }
         $process = $processes[[int]$row.OwningProcess]
         $name = 'Unknown'; $path = ''
         if ($null -ne $process) { $name = [string]$process.Name; $path = [string]$process.ExecutablePath }
@@ -61,7 +72,7 @@ function Get-ConnectionSnapshot([bool]$CollectUdp=$true) {
         $connections[$key] = [pscustomobject]@{
             LocalIP=[string]$row.LocalAddress; LocalPort=[int]$row.LocalPort
             RemoteIP=[string]$row.RemoteAddress; RemotePort=[int]$row.RemotePort
-            ProcessId=[int]$row.OwningProcess; ProcessName=$name; Software=$path; Protocol='TCP'; SocketState='ESTABLISHED'
+            ProcessId=[int]$row.OwningProcess; ProcessName=$name; Software=$path; Protocol='TCP'; SocketState='ESTABLISHED'; Direction=$direction; DirectionBasis=$basis
         }
     }
     if ($CollectUdp) {
@@ -76,7 +87,7 @@ function Get-ConnectionSnapshot([bool]$CollectUdp=$true) {
             $connections[$key]=[pscustomobject]@{
                 LocalIP=[string]$endpoint.LocalAddress; LocalPort=[int]$endpoint.LocalPort
                 RemoteIP=''; RemotePort=0; ProcessId=[int]$endpoint.OwningProcess
-                ProcessName=$name; Software=$path; Protocol='UDP'; SocketState='BOUND'
+                ProcessName=$name; Software=$path; Protocol='UDP'; SocketState='BOUND'; Direction='unknown'; DirectionBasis='unavailable'
             }
         }
     }
@@ -91,13 +102,14 @@ function New-AgentEvent($Config, [string]$Snapshot, [string]$Type, $Connection) 
         TIMESTAMP_UTC=$now.ToString('yyyy-MM-ddTHH:mm:ss.fffzzz'); DATE_AND_TIME=[DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss.fff')
         SOURCE_IP=''; SOURCE_DOMAIN_NAME=[string]$Config.agent_id; PROCESS_NAME=''; PROCESS_ID=''
         RECIEVER_IP=''; RECIEVER_DOMAINNAME=''; PORT_USED=''; SOFTWARE_THAT_USED=''; SOURCE_PORT=''
-        PROTOCOL=''; STATE=''; OPERATING_SYSTEM='Windows'; MONITORED_HOST=[string]$Config.agent_id; SNAPSHOT_ID=$Snapshot
+        CONNECTION_DIRECTION='unknown'; DIRECTION_BASIS='unavailable'; PROTOCOL=''; STATE=''; OPERATING_SYSTEM='Windows'; MONITORED_HOST=[string]$Config.agent_id; SNAPSHOT_ID=$Snapshot
     }
     if ($null -ne $Connection) {
         $row.SOURCE_IP=$Connection.LocalIP; $row.PROCESS_NAME=$Connection.ProcessName; $row.PROCESS_ID=[string]$Connection.ProcessId
         $row.RECIEVER_IP=$Connection.RemoteIP
         if ($Connection.RemotePort -gt 0) { $row.PORT_USED=[string]$Connection.RemotePort }
         $row.SOFTWARE_THAT_USED=$Connection.Software; $row.SOURCE_PORT=[string]$Connection.LocalPort
+        if($Connection.PSObject.Properties['Direction']) { $row.CONNECTION_DIRECTION=$Connection.Direction; $row.DIRECTION_BASIS=$Connection.DirectionBasis }
         $row.PROTOCOL=$Connection.Protocol; $row.STATE=$Connection.SocketState
         if ($Type -in @('TCP_DISCONNECTED','UDP_ENDPOINT_CLOSED')) { $row.STATE='CLOSED_OR_NOT_OBSERVED' }
     }
@@ -181,6 +193,11 @@ function Invoke-ServerAgent([string]$Path, [bool]$RunOnce) {
             $clock = [Diagnostics.Stopwatch]::StartNew(); $failed = $false
             try {
                 $current = Get-ConnectionSnapshot $config.collect_udp
+                if($null -ne $previous){foreach($key in @($current.Keys)){
+                    if($previous.ContainsKey($key) -and $previous[$key].Direction -ne 'unknown'){
+                        $current[$key].Direction=$previous[$key].Direction;$current[$key].DirectionBasis=$previous[$key].DirectionBasis
+                    }
+                }}
                 $batch = [Collections.Generic.List[object]]::new()
                 $snapshot = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
                 foreach ($key in $current.Keys) {

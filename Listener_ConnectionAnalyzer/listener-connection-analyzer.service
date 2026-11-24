@@ -1,0 +1,24 @@
+[Unit]
+Description=Listener independent connection analyzer
+After=network.target
+
+[Service]
+Type=simple
+User=watcher-collector
+Group=watcher-collector
+WorkingDirectory=/opt/listener-connection-analyzer
+ExecStart=/opt/listener-connection-analyzer/Listener_ConnectionAnalyzer --config /etc/watcher-connection-analyzer/config.json
+StateDirectory=watcher-connection-analyzer
+StateDirectoryMode=0750
+Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/var/lib/watcher-connection-analyzer/.net
+UMask=0027
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/watcher-connection-analyzer
+
+[Install]
+WantedBy=multi-user.target

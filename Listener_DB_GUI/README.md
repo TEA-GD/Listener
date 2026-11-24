@@ -308,3 +308,15 @@ Rebuild/restart only the GUI and reload the browser. No new Collector/agent upda
 ## Attachment mail information
 
 The Mail alerts page now reads only `mail_information`, showing observed receipt date, device, sender, recipients, attachment count and names/formats/sizes. No message body or variant selector remains. The existing separate GUI viewing-key configuration is retained. See [the new add-on and migration guide](../Thunderbird_Attachments/README.md).
+
+## It's time to analyze
+
+The existing device button now opens Incoming, Outgoing and Unknown connections from
+the separate `Listener_ConnectionAnalyzer` database. Filter all recorded identities,
+connections first seen on a day, or peer IPs never observed before that day in any
+direction. Time zone selection applies to first-seen dates. TCP directions are labeled
+estimated; old/ambiguous reports remain Unknown. The GUI does not run the analyzer.
+
+Start the independent module and point `WATCHER_ANALYSIS_DB_PATH` (or
+`AnalysisDatabasePath`) to its DB. Windows start/launch scripts accept
+`-AnalysisDatabasePath`. See [setup, identity rules and upgrade order](../Listener_ConnectionAnalyzer/README.md).

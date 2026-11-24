@@ -10,7 +10,7 @@ using System.Text.RegularExpressions;
 namespace WatcherAgent;
 
 internal sealed record Connection(string LocalIP, int LocalPort, string RemoteIP,
-                                  int RemotePort, int PID, string Process, string Software, string Protocol = "TCP", string SocketState = "ESTABLISHED")
+                                  int RemotePort, int PID, string Process, string Software, string Protocol = "TCP", string SocketState = "ESTABLISHED", string Direction = "unknown", string DirectionBasis = "unavailable")
 {
     public string Key => string.Join("\u001f", LocalIP, LocalPort, RemoteIP, RemotePort, PID, Protocol);
 }
@@ -27,11 +27,23 @@ internal static class Program
         $tcp=@()
         try { $tcp=@(Get-NetTCPConnection -State Established -ErrorAction Stop) }
         catch { if ($_.FullyQualifiedErrorId -notlike 'CmdletizationQuery_NotFound*') { throw } }
+        $listeners=@();$listenKnown=$true
+        try { $listeners=@(Get-NetTCPConnection -State Listen -ErrorAction Stop) }
+        catch { if ($_.FullyQualifiedErrorId -notlike 'CmdletizationQuery_NotFound*') { $listenKnown=$false } }
         $rows=@($tcp | ForEach-Object {
+          $socket=$_;$direction='unknown';$basis='unavailable'
+          if($listenKnown){
+            $matching=@($listeners | Where-Object {
+              $_.LocalPort -eq $socket.LocalPort -and
+              ($_.LocalAddress -eq $socket.LocalAddress -or $_.LocalAddress -eq '0.0.0.0' -or $_.LocalAddress -eq '::') -and
+              ($_.OwningProcess -eq $socket.OwningProcess -or $_.OwningProcess -eq 0 -or $socket.OwningProcess -eq 0)
+            })
+            if($matching.Count){$direction='incoming';$basis='local_listener'}else{$direction='outgoing';$basis='no_local_listener'}
+          }
           $p=$procs[[int]$_.OwningProcess]
           [PSCustomObject]@{local_ip=[string]$_.LocalAddress;local_port=[int]$_.LocalPort;
            remote_ip=[string]$_.RemoteAddress;remote_port=[int]$_.RemotePort;
-           pid=[int]$_.OwningProcess;process=[string]$p.Name;software=[string]$p.Path;protocol='TCP';socket_state='ESTABLISHED'}
+           pid=[int]$_.OwningProcess;process=[string]$p.Name;software=[string]$p.Path;protocol='TCP';socket_state='ESTABLISHED';connection_direction=$direction;direction_basis=$basis}
         })
         if (__COLLECT_UDP__) {
           $udp=@()
@@ -116,6 +128,11 @@ internal static class Program
             try
             {
                 var current = Collect(cfg.collect_udp);
+                // Retain the first estimate for the lifetime of an observed socket;
+                // its listener may close before the accepted connection disappears.
+                if (previous is not null) foreach (string key in current.Keys.ToArray())
+                    if (previous.TryGetValue(key, out var prior) && prior.Direction != "unknown")
+                        current[key] = current[key] with { Direction = prior.Direction, DirectionBasis = prior.DirectionBasis };
                 var changes = new List<(string Event, Connection Connection)>();
                 if (previous is null)
                 {
@@ -222,7 +239,8 @@ internal static class Program
             int.TryParse(Str(item, "pid"), out int pid);
             output.Add(new(local, lp, remote, rp, pid,
                            Str(item, "process", "Unknown"), Str(item, "software"),
-                           Str(item, "protocol", "TCP"), Str(item, "socket_state", "ESTABLISHED")));
+                           Str(item, "protocol", "TCP"), Str(item, "socket_state", "ESTABLISHED"),
+                           Str(item, "connection_direction", "unknown"), Str(item, "direction_basis", "unavailable")));
         }
         return output;
     }
@@ -236,8 +254,37 @@ internal static class Program
     private static IEnumerable<Connection> CollectLinux(bool collectUdp)
     {
         var rows = ParseLinuxConnections(RunCommand("ss", "-H", "-n", "-t", "-p", "state", "established"), "TCP").ToList();
+        try
+        {
+            var listeners = ParseLinuxListeners(RunCommand("ss", "-H", "-n", "-t", "-l", "-p")).ToArray();
+            rows = rows.Select(c => EstimateDirection(c, listeners)).ToList();
+        }
+        catch { /* Missing listener visibility retains Unknown; never guess from port ranges. */ }
         if (collectUdp) rows.AddRange(ParseLinuxConnections(RunCommand("ss", "-H", "-n", "-u", "-a", "-p"), "UDP"));
         return rows;
+    }
+
+    internal sealed record Listener(string IP, int Port, int PID);
+
+    internal static IEnumerable<Listener> ParseLinuxListeners(string data)
+    {
+        foreach (string line in data.Split('\n'))
+        {
+            var fields = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            int at = fields.Length > 0 && fields[0] == "LISTEN" ? 3 : 2;
+            if (fields.Length <= at || !Endpoint(fields[at], out string ip, out int port)) continue;
+            var owner = LinuxProc.Match(line);
+            yield return new Listener(ip, port, owner.Success ? int.Parse(owner.Groups["pid"].Value, CultureInfo.InvariantCulture) : 0);
+        }
+    }
+
+    internal static Connection EstimateDirection(Connection socket, IEnumerable<Listener> listeners)
+    {
+        if (socket.Protocol != "TCP") return socket;
+        bool match = listeners.Any(l => l.Port == socket.LocalPort &&
+            (l.IP == socket.LocalIP || l.IP is "0.0.0.0" or "::" or "*") &&
+            (l.PID == socket.PID || l.PID == 0 || socket.PID == 0));
+        return socket with { Direction = match ? "incoming" : "outgoing", DirectionBasis = match ? "local_listener" : "no_local_listener" };
     }
 
     private static IEnumerable<Connection> ParseLinuxConnections(string data, string protocol)
@@ -299,6 +346,8 @@ internal static class Program
             ["SOFTWARE_THAT_USED"] = c?.Software ?? "",
             ["SOURCE_PORT"] = c is null ? "" : c.LocalPort.ToString(CultureInfo.InvariantCulture),
             ["PROTOCOL"] = c?.Protocol ?? "",
+            ["CONNECTION_DIRECTION"] = c?.Direction ?? "unknown",
+            ["DIRECTION_BASIS"] = c?.DirectionBasis ?? "unavailable",
             ["STATE"] = type is "TCP_DISCONNECTED" or "UDP_ENDPOINT_CLOSED" ? "CLOSED_OR_NOT_OBSERVED" : c?.SocketState ?? "",
             ["OPERATING_SYSTEM"] = isLinux ? "Linux" : "Windows",
             ["MONITORED_HOST"] = agentId,

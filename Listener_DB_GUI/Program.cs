@@ -8,6 +8,8 @@ if (string.IsNullOrEmpty(builder.Configuration["urls"])) builder.WebHost.UseUrls
 builder.Services.AddSingleton(new ViewerDatabase(
     Environment.GetEnvironmentVariable("WATCHER_DB_PATH") ?? builder.Configuration["DatabasePath"] ??
     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WatcherCollector", "watcher-events.db")));
+builder.Services.AddSingleton(new ConnectionAnalysis(Environment.GetEnvironmentVariable("WATCHER_ANALYSIS_DB_PATH") ?? builder.Configuration["AnalysisDatabasePath"] ??
+    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WatcherConnectionAnalyzer", "connection-analysis.db")));
 string mailViewToken=Environment.GetEnvironmentVariable("LISTENER_MAIL_VIEW_TOKEN")??(Environment.GetEnvironmentVariable("LISTENER_MAIL_VIEW_TOKEN_FILE") is string mailKeyPath?File.ReadAllText(mailKeyPath).Trim():"");
 if(mailViewToken.Length>0&&mailViewToken.Length<32)throw new ArgumentException("Mail viewing key must contain at least 32 characters.");
 int onlineTimeout=int.TryParse(builder.Configuration["OnlineTimeoutSeconds"]??"120",out int configuredTimeout)?configuredTimeout:throw new ArgumentException("OnlineTimeoutSeconds must be an integer.");
@@ -42,6 +44,8 @@ app.MapGet("/api/connection-names",(HttpRequest request,ConnectionNames names)=>
         throw new ArgumentException("Invalid IP address.")).DistinctBy(pair=>pair.Input).ToArray();
     return Results.Ok(new { names=addresses.ToDictionary(pair=>pair.Input,pair=>names.Request(pair.Address)) });
 });
+app.MapGet("/api/analysis/devices", (ConnectionAnalysis analysis) => analysis.Devices());
+app.MapGet("/api/analysis", (HttpRequest request, ConnectionAnalysis analysis) => analysis.Read(request));
 app.MapGet("/api/network-context",(HttpRequest request,ViewerDatabase database)=>NetworkContextView.Read(request,database));
 app.MapGet("/api/pcs", (ViewerDatabase database) => {
     using var db = database.Open();
@@ -220,9 +224,10 @@ sealed class ViewerDatabase(string path)
     }
     public static bool HasReadModel(SqliteConnection db) => Query(db,"SELECT 1 FROM sqlite_master WHERE type='table' AND name='gui_schema'").Count>0 &&
         Query(db,"SELECT 1 FROM gui_schema WHERE version=1").Count>0;
-    public static List<Dictionary<string, object?>> Query(SqliteConnection db, string sql, Dictionary<string, object>? parameters = null) {
+    public static List<Dictionary<string, object?>> Query(SqliteConnection db, string sql, Dictionary<string, object>? parameters = null, SqliteTransaction? transaction = null) {
         using var cmd = db.CreateCommand();
         cmd.CommandText = sql;
+        cmd.Transaction = transaction;
         if (parameters is not null) foreach (var pair in parameters) cmd.Parameters.AddWithValue(pair.Key, pair.Value);
         using var reader = cmd.ExecuteReader();
         var rows = new List<Dictionary<string, object?>>();

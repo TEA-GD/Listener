@@ -10,6 +10,7 @@ function Get-NetUDPEndpoint {
 $script:sample = 0
 function Get-NetTCPConnection {
     param($State)
+    if ($State -eq 'Listen') { return }
     $script:sample++
     if ($Mode -in @('Udp','UdpContinuous')) { return }
     if ($Mode -eq 'Continuous' -and $script:sample -ge 3) { return }

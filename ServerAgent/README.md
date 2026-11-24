@@ -167,3 +167,10 @@ Registration copies `Shared/NetworkContext.ps1` beside the installed agent. Each
 ## Pipelined VPN delivery
 
 The updated ServerAgent negotiates pipeline support on its first ordinary event, then sends groups of up to 64 events/128 KiB before reading per-event durable ACKs. Legacy Collectors receive sequential traffic automatically; old timestamps and unacknowledged files are preserved. Update the Collector first, then re-register the updated ServerAgent while retaining its spool. Existing five-second replay yielding and configurable `send_batch_size` limits remain. See [VPN backlog behavior](../Agent/README.md#vpn-backlog-pipelined-delivery).
+
+## Estimated incoming/outgoing direction
+
+Re-register the current script after updating the Collector to retain TCP listener-based
+`CONNECTION_DIRECTION`/`DIRECTION_BASIS`. These are estimates, kept for an observed
+socket's lifetime. Missing listener visibility, older reports and UDP remain Unknown.
+See [independent connection analyzer setup and semantics](../Listener_ConnectionAnalyzer/README.md).

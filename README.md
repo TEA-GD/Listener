@@ -158,10 +158,10 @@ cd Agent
 ./build/build-linux.sh
 ```
 
-The package will be written to `Agent/output/watcher-agent_1.0.4_amd64.deb`. On the target Linux machine:
+The package will be written to `Agent/output/watcher-agent_1.0.5_amd64.deb`. On the target Linux machine:
 
 ```bash
-sudo env WATCHER_DEVICE_CATEGORY=linux_servers apt install ./watcher-agent_1.0.4_amd64.deb
+sudo env WATCHER_DEVICE_CATEGORY=linux_servers apt install ./watcher-agent_1.0.5_amd64.deb
 sudo systemctl status watcher-agent
 sudo journalctl -u watcher-agent -n 50 --no-pager
 ```
@@ -333,3 +333,13 @@ Run `Listener_DB_GUI/Launch-Windows.bat`, choose **Local only** or **Domain netw
 ## Device online status and timeline
 
 The Overview IP box now shows **blue online / red offline**, current or last online duration, and a **Show online graph** link. The graph shows daily online totals and hourly periods, with date/time-zone controls. Availability is estimated from retained agent heartbeats with a default two-minute grace interval. [Details](Listener_DB_GUI/README.md#online-status-and-daily-availability-timeline).
+
+## Independent incoming/outgoing connection analysis
+
+The device's **It's time to analyze** button opens the new analysis page. Run
+[Listener_ConnectionAnalyzer](Listener_ConnectionAnalyzer/README.md) independently to
+read the main DB and maintain its own `analysis_connections` table in a separate DB.
+The page shows unique Incoming/Outgoing/Unknown connections and first-seen connections
+or peer IPs for a selected day/time zone. Upgrade the Collector, then Agents (Linux
+package 1.0.5), then start the module/update the GUI. Historical reports remain Unknown;
+new TCP directions are explicitly estimated from listening ports.

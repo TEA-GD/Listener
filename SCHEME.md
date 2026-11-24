@@ -14,7 +14,10 @@ flowchart LR
     PS -->|Plain TCP 6515 and durable ACKs| C
     C --> D[(SQLite)]
     D --> G[Read-only GUI HTTP 5080]
-    D --> N[Analyzer reads connection events]
+    D --> N[Behavioral alert analyzer]
+    D --> CA[Independent connection analyzer]
+    CA --> AD[(Connection analysis DB)]
+    AD --> G
 ```
 
 The compiled Agent runs on Windows/Linux. Its local mail endpoint is disabled until `mail_token` is configured; it binds only to `127.0.0.1`. ServerAgent remains a separate connection/network sampler and does not supply this mail bridge. Collector TCP is unencrypted and unauthenticated; deploy on a restricted management LAN or protected VPN with firewall/CIDR restrictions. Agent identity is reported, not authenticated.
@@ -52,3 +55,14 @@ The GUI mail page remains read-only and requires its separate viewing key. The A
 ## Component guides
 
 [Agent](Agent/README.md) · [Linux deployment](LINUX-DEPLOYMENT.md) · [ServerAgent](ServerAgent/README.md) · [Collector](Collector/README.md) · [GUI](Listener_DB_GUI/README.md) · [Analyzer](Listener_Analyzer/README.md) · [Device storage](DEVICE-STORAGE.md) · [Single mail add-on](Thunderbird_Attachments/README.md)
+
+## Independent incoming/outgoing analysis
+
+`Listener_ConnectionAnalyzer` reads the main `events` view read-only and writes its own
+`connection-analysis.db` (`analysis_connections`, `analysis_meta`). The GUI reads this
+second DB using `WATCHER_ANALYSIS_DB_PATH`; **It's time to analyze** opens its Incoming,
+Outgoing and Unknown views, with first-seen connections/peers for a selected day/zone.
+TCP direction metadata is estimated at the Agent using local listeners and preserved
+by the updated Collector; older/ambiguous observations remain Unknown. Original event
+time, opposite-direction history and late replay determine novelty. This is separate
+from the existing alert analyzer. See [deployment and semantics](Listener_ConnectionAnalyzer/README.md).

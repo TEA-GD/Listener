@@ -39,6 +39,7 @@ internal static class AgentIntegration
             Check(rejected, "Invalid port accepted");
         }
         TestUdp();
+        TestDirections();
         var createSnapshot=typeof(WatcherAgent.Program).GetMethod("CreateSnapshot",BindingFlags.NonPublic|BindingFlags.Static)!;
         var sockets=new[]{new Connection("10.0.0.1",5000,"198.51.100.1",443,12,"app","app"),new Connection("0.0.0.0",5353,"",0,13,"udp","udp","UDP","BOUND")};
         var full=(List<Dictionary<string,string>>)createSnapshot.Invoke(null,new object[]{"agent","test-snapshot",sockets})!;
@@ -55,6 +56,38 @@ internal static class AgentIntegration
         await TestPipeline(true);
         await TestPipeline(false,true);
         Console.WriteLine("PASS: configuration, socket parsing, legacy/pipelined delivery, independent backlog draining, concurrent spool writes, cancellation and replay");
+    }
+
+    private static void TestDirections()
+    {
+        var inbound = new Connection("192.0.2.5", 443, "203.0.113.9", 50000, 123, "server", "/server");
+        var listeners = WatcherAgent.Program.ParseLinuxListeners("LISTEN 0 128 0.0.0.0:443 0.0.0.0:* users:((\"server\",pid=123,fd=8))\nLISTEN 0 128 [::]:22 [::]:* users:((\"sshd\",pid=44,fd=4))").ToArray();
+        Check(listeners.Length == 2, "Linux listener parser lost a wildcard/IPv6 row");
+        Check(WatcherAgent.Program.EstimateDirection(inbound, listeners).Direction == "incoming", "Listening socket was not estimated incoming");
+        Check(WatcherAgent.Program.EstimateDirection(inbound with { LocalPort = 50001, RemotePort = 443 }, listeners).Direction == "outgoing", "Client socket was not estimated outgoing");
+        Check(WatcherAgent.Program.EstimateDirection(inbound with { PID = 456 }, listeners).Direction == "outgoing", "Another process's listener was matched");
+        Check(WatcherAgent.Program.EstimateDirection(inbound with { Protocol = "UDP" }, listeners).Direction == "unknown", "UDP direction was invented");
+        if (OperatingSystem.IsLinux())
+        {
+            var address = NetworkInterface.GetAllNetworkInterfaces().SelectMany(i => i.GetIPProperties().UnicastAddresses)
+                .Select(i => i.Address).FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(a));
+            if (address is not null)
+            {
+                var server = new TcpListener(IPAddress.Any, 0); server.Start();
+                try
+                {
+                    int port = ((IPEndPoint)server.LocalEndpoint).Port;
+                    using var client = new TcpClient(); client.Connect(address, port);
+                    using var accepted = server.AcceptTcpClient();
+                    var collect = typeof(WatcherAgent.Program).GetMethod("CollectLinux", BindingFlags.NonPublic | BindingFlags.Static)!;
+                    var rows = ((IEnumerable<Connection>)collect.Invoke(null, new object[] { false })!).ToArray();
+                    Check(rows.Any(r => r.LocalPort == port && r.Direction == "incoming"), "Live Linux accepted socket not classified");
+                    Check(rows.Any(r => r.RemotePort == port && r.Direction == "outgoing"), "Live Linux client socket not classified");
+                }
+                finally { server.Stop(); }
+            }
+        }
+        Console.WriteLine("PASS: listener direction estimates, owner matching and live Linux accepted/client sockets");
     }
 
     private static async Task TestIndependentUpload()

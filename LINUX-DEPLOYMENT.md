@@ -126,16 +126,16 @@ From the source checkout on a matching Debian build machine:
 
 ```bash
 bash Agent/build/build-linux.sh
-dpkg-deb -f Agent/output/watcher-agent_1.0.4_amd64.deb Version Depends
+dpkg-deb -f Agent/output/watcher-agent_1.0.5_amd64.deb Version Depends
 ```
 
-The script rejects distributions other than Debian 12/13 and architectures other than amd64. The independent-upload-worker package is version 1.0.4. Build from current source; it upgrades the older 1.0.3 package without removing configuration or pending events.
+The script rejects distributions other than Debian 12/13 and architectures other than amd64. The current package is version 1.0.5, adding estimated TCP direction while retaining the independent uploader introduced in 1.0.4. Build from current source; upgrades preserve configuration and pending events.
 
 On each target device, install the newly built package. If you copied it to another directory, adjust the path:
 
 ```bash
 sudo env WATCHER_DEVICE_CATEGORY=linux_servers \
-  apt install ./Agent/output/watcher-agent_1.0.4_amd64.deb
+  apt install ./Agent/output/watcher-agent_1.0.5_amd64.deb
 sudo systemctl stop watcher-agent.service
 sudo nano /etc/watcher-agent/agent.json
 ```
@@ -216,11 +216,11 @@ sudo systemctl start watcher-collector.service
 
 Keep `/etc/watcher-collector/collector.json` and `/var/lib/watcher-collector`. Startup applies supported schema migrations. Recheck logs before updating Agents.
 
-For an Agent, install version 1.0.4 over the old package. If reinstalling a rebuilt package with the same version, use:
+For an Agent, install version 1.0.5 over the old package. If reinstalling a rebuilt package with the same version, use:
 
 ```bash
 sudo env WATCHER_DEVICE_CATEGORY=linux_servers \
-  apt install --reinstall ./Agent/output/watcher-agent_1.0.4_amd64.deb
+  apt install --reinstall ./Agent/output/watcher-agent_1.0.5_amd64.deb
 ```
 
 Existing configuration and queued events are retained. Confirm the destination and restart the service. Do not purge or delete the spool to work around a delivery problem.

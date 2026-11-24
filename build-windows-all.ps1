@@ -7,7 +7,7 @@ Write-Host 'Building Watcher Agent (plain TCP, no TLS)...' -ForegroundColor Cyan
 & (Join-Path $Root 'Agent\build\build-windows.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Agent build failed.' }
 
-foreach ($project in @('Listener_Analyzer','Listener_DB_GUI')) {
+foreach ($project in @('Listener_Analyzer','Listener_ConnectionAnalyzer','Listener_DB_GUI')) {
     Write-Host "Building $project..." -ForegroundColor Cyan
     & (Join-Path $Root "$project\build-windows.ps1")
     if ($LASTEXITCODE -ne 0) { throw "$project build failed." }

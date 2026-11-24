@@ -1,6 +1,7 @@
 param(
     [string]$DatabasePath=(Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'WatcherCollector\watcher-events.db'),
     [ValidateRange(1,65535)][int]$Port=5080,
+    [string]$AnalysisDatabasePath = '',
     [string]$MailViewKeyFile='',
     [ValidateSet('Local','Domain')][string]$AccessMode='Local'
 )
@@ -58,6 +59,7 @@ $startButton.Add_Click({
         # File paths are passed as quoted -File arguments, never interpolated into -Command.
         $guiScriptPath=Join-Path $PSScriptRoot 'Start-Windows.ps1'
         $guiArguments=@('-NoExit','-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$guiScriptPath+'"'),'-AccessMode',$guiMode,'-Port',([int]$portBox.Value),'-DatabasePath',('"'+$guiDatabase+'"'))
+        if($AnalysisDatabasePath){$guiArguments+=@('-AnalysisDatabasePath',('"'+$AnalysisDatabasePath+'"'))}
         if($guiKey){$guiArguments+=@('-MailViewKeyFile',('"'+$guiKey+'"'))}
         if($browserBox.Checked){$guiArguments+='-OpenBrowser'}
         $guiStartParameters=@{FilePath=(Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell\v1.0\powershell.exe');ArgumentList=$guiArguments;PassThru=$true}

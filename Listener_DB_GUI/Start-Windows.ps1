@@ -1,6 +1,7 @@
 param(
     [string]$DatabasePath = (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'WatcherCollector\watcher-events.db'),
     [ValidateRange(1,65535)][int]$Port = 5080,
+    [string]$AnalysisDatabasePath = '',
     [string]$MailViewKeyFile,
     [ValidateSet('Local','Domain')][string]$AccessMode='Local',
     [switch]$ConfigureFirewall,
@@ -29,10 +30,12 @@ try {
 } catch { throw "TCP port $Port is already in use or unavailable. Stop the existing GUI server before switching mode, or choose another port." }
 finally { $guiProbe.Dispose() }
 $guiBrowserJob=$null
+$previousAnalysis = $env:WATCHER_ANALYSIS_DB_PATH
 $previousPath = $env:WATCHER_DB_PATH
 $previousMailFile = $env:LISTENER_MAIL_VIEW_TOKEN_FILE
 $previousMailToken = $env:LISTENER_MAIL_VIEW_TOKEN
 try {
+    if ($AnalysisDatabasePath) { $env:WATCHER_ANALYSIS_DB_PATH = [IO.Path]::GetFullPath($AnalysisDatabasePath) }
     if ($MailViewKeyFile) { $env:LISTENER_MAIL_VIEW_TOKEN = $null; $env:LISTENER_MAIL_VIEW_TOKEN_FILE = (Resolve-Path -LiteralPath $MailViewKeyFile).Path }
     $env:WATCHER_DB_PATH = (Resolve-Path -LiteralPath $DatabasePath).Path
     if ($ConfigureFirewall) { Set-ListenerGuiDomainFirewall -Port $Port }
@@ -65,4 +68,4 @@ try {
 }
 finally {
     if($guiBrowserJob){Stop-Job -Job $guiBrowserJob -ErrorAction SilentlyContinue;Remove-Job -Job $guiBrowserJob -Force -ErrorAction SilentlyContinue}
-    $env:WATCHER_DB_PATH = $previousPath; $env:LISTENER_MAIL_VIEW_TOKEN_FILE = $previousMailFile; $env:LISTENER_MAIL_VIEW_TOKEN = $previousMailToken }
+    $env:WATCHER_ANALYSIS_DB_PATH = $previousAnalysis; $env:WATCHER_DB_PATH = $previousPath; $env:LISTENER_MAIL_VIEW_TOKEN_FILE = $previousMailFile; $env:LISTENER_MAIL_VIEW_TOKEN = $previousMailToken }

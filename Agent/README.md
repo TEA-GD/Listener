@@ -104,7 +104,7 @@ soft budget between groups, then exit; an in-flight group still uses network tim
 It does not run a continuous uploader.
 
 Deploy by rebuilding/updating the Windows installer with **Install / Update**, or by
-installing the rebuilt Linux **1.0.4** package. Existing configuration and spool are
+installing the rebuilt Linux **1.0.5** package. Existing configuration and spool are
 retained; no new settings, Collector update or database migration is needed for this
 worker. The existing updated Collector is still needed for all current event types.
 The separate PowerShell ServerAgent retains its existing sender loop.
@@ -121,3 +121,13 @@ Tests cover continuous passes beyond 1,000 events, publishing while an ACK is st
 legacy/pipelined receivers, cancellation, replay with unchanged payloads, ignored `.tmp`
 files and actual process-level sampling/queue locking on Linux. Windows Task Scheduler
 and power transitions still require checks on a Windows test device.
+
+## Estimated connection direction
+
+The current compiled Agent samples TCP listeners alongside established sockets and
+adds `CONNECTION_DIRECTION`/`DIRECTION_BASIS`. Listener matches are estimated incoming;
+no match after a successful query is estimated outgoing. Unavailable listener metadata
+and UDP remain Unknown. The estimate is retained while that socket stays observed.
+Update the Collector first so these fields are retained. Existing queued reports are
+unchanged. See [independent connection analysis](../Listener_ConnectionAnalyzer/README.md)
+for limitations, upgrade order and the GUI's new Incoming/Outgoing/Unknown views.
