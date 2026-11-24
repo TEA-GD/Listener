@@ -18,7 +18,7 @@ case "${VERSION_ID:-}" in
   13) RUNTIME_DEPENDS='libc6 (>= 2.41), libgcc-s1, libstdc++6, libssl3t64, libicu76, zlib1g' ;;
   *) echo "Unsupported Debian release: ${VERSION_ID:-unknown}. Supported: 12, 13." >&2; exit 1 ;;
 esac
-PACKAGE_VERSION=1.0.3
+PACKAGE_VERSION=1.0.4
 echo "Building Watcher Agent $PACKAGE_VERSION for Debian $VERSION_ID amd64"
 OUT="$ROOT/output/linux-agent"
 BUILD="$ROOT/output/deb-stage"

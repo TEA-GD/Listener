@@ -49,10 +49,126 @@ internal static class AgentIntegration
         Check(empty.Count==1&&empty[0]["STATE"]=="SNAPSHOT_COMPLETE:0","Empty state must reset prior sockets");
         foreach (bool acknowledge in new[] { true, false }) await TestDelivery(acknowledge);
         await TestSlowBacklog();
+        await TestIndependentUpload();
+        await TestUploadCancellationAndReplay();
         await TestPipeline(false);
         await TestPipeline(true);
         await TestPipeline(false,true);
-        Console.WriteLine("PASS: hostname configuration, legacy defaults, validation, DNS TCP delivery, ACK deletion and failed-ACK retention");
+        Console.WriteLine("PASS: configuration, socket parsing, legacy/pipelined delivery, independent backlog draining, concurrent spool writes, cancellation and replay");
+    }
+
+    private static async Task TestIndependentUpload()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "watcher-upload-" + Guid.NewGuid());
+        Directory.CreateDirectory(root);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            const string stamp = "2026-11-01T00:00:00Z";
+            for (int i = 0; i < 1001; i++)
+                File.WriteAllText(Path.Combine(root, i.ToString("D4") + ".json"),
+                    JsonSerializer.Serialize(new { EVENT_ID = Guid.NewGuid().ToString(), TIMESTAMP_UTC = stamp }));
+            string unfinished = Path.Combine(root, "unfinished.tmp");
+            File.WriteAllText(unfinished, "incomplete JSON must never be sent");
+            var waitingForAck = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseAck = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var seen = new HashSet<string>();
+            int connections = 0;
+            var server = Task.Run(async () => {
+                while (seen.Count < 1101)
+                {
+                    using var client = await listener.AcceptTcpClientAsync(timeout.Token);
+                    connections++;
+                    using var stream = client.GetStream();
+                    using var reader = new StreamReader(stream);
+                    while (await reader.ReadLineAsync(timeout.Token) is string line)
+                    {
+                        using var doc = JsonDocument.Parse(line);
+                        var row = doc.RootElement.GetProperty("event");
+                        string id = row.GetProperty("EVENT_ID").GetString()!;
+                        Check(row.GetProperty("TIMESTAMP_UTC").GetString() == stamp, "Worker changed replay time");
+                        if (seen.Count == 0)
+                        {
+                            waitingForAck.SetResult();
+                            await releaseAck.Task.WaitAsync(timeout.Token);
+                        }
+                        Check(seen.Add(id), "Competing uploader duplicated a pending event");
+                        string extension = doc.RootElement.TryGetProperty("request_pipeline", out _) ? " PIPELINE64" : "";
+                        await stream.WriteAsync(Encoding.ASCII.GetBytes("ACK " + id + extension + "\n"), timeout.Token);
+                        if (seen.Count == 1101) return;
+                    }
+                }
+            });
+            var config = new AgentConfig { spool_dir = root, collector_host = "localhost", collector_port = ((IPEndPoint)listener.LocalEndpoint).Port };
+            using (var uploader = new UploadWorker(config))
+            {
+                await waitingForAck.Task.WaitAsync(timeout.Token);
+                var rows = Enumerable.Range(0, 100).Select(_ => new Dictionary<string, string> {
+                    ["EVENT_ID"] = Guid.NewGuid().ToString(), ["TIMESTAMP_UTC"] = stamp
+                }).ToList();
+                // Simulate collection/mail publishing while the sender is blocked on an ACK.
+                await Task.Run(() => typeof(WatcherAgent.Program).GetMethod("QueueBatch", BindingFlags.NonPublic | BindingFlags.Static)!
+                    .Invoke(null, new object[] { root, rows })).WaitAsync(TimeSpan.FromSeconds(2));
+                uploader.Wake();
+                Check(Directory.GetFiles(root, "*.json").Length == 1101, "Unacknowledged files were deleted");
+                releaseAck.SetResult();
+                await server.WaitAsync(timeout.Token);
+                while (Directory.GetFiles(root, "*.json").Length > 0) await Task.Delay(20, timeout.Token);
+            }
+            Check(connections >= 2, "Worker did not continue after the 1000-event pass limit");
+            Check(File.Exists(unfinished), "Uploader consumed an unpublished temporary file");
+        }
+        finally { listener.Stop(); Directory.Delete(root, true); }
+    }
+
+    private static async Task TestUploadCancellationAndReplay()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "watcher-upload-cancel-" + Guid.NewGuid());
+        Directory.CreateDirectory(root);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            string id = Guid.NewGuid().ToString(), file = Path.Combine(root, "pending.json");
+            string original = JsonSerializer.Serialize(new { EVENT_ID = id, TIMESTAMP_UTC = "2026-11-01T00:00:00Z" });
+            File.WriteAllText(file, original);
+            var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var server = Task.Run(async () => {
+                // The first connection loses its ACK. Stopping must interrupt the read.
+                using (var client = await listener.AcceptTcpClientAsync(timeout.Token))
+                using (var reader = new StreamReader(client.GetStream()))
+                {
+                    Check(await reader.ReadLineAsync(timeout.Token) is not null, "No first upload");
+                    received.SetResult();
+                    Check(await reader.ReadLineAsync(timeout.Token) is null, "Sender did not close on cancellation");
+                }
+                using var retry = await listener.AcceptTcpClientAsync(timeout.Token);
+                using var stream = retry.GetStream();
+                using var replay = new StreamReader(stream);
+                using var row = JsonDocument.Parse((await replay.ReadLineAsync(timeout.Token))!);
+                Check(row.RootElement.GetProperty("event").GetRawText() == original, "Restart changed queued payload");
+                await stream.WriteAsync(Encoding.ASCII.GetBytes("ACK " + id + "\n"), timeout.Token);
+            });
+            var config = new AgentConfig { spool_dir = root, collector_host = "localhost", collector_port = ((IPEndPoint)listener.LocalEndpoint).Port };
+            var uploader = new UploadWorker(config);
+            try { await received.Task.WaitAsync(timeout.Token); }
+            finally
+            {
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                uploader.Dispose();
+                Check(clock.Elapsed < TimeSpan.FromSeconds(3), "Shutdown waited for the network read timeout");
+            }
+            Check(File.ReadAllText(file) == original, "Cancellation lost or changed unacknowledged data");
+            using (var retry = new UploadWorker(config))
+            {
+                await server.WaitAsync(timeout.Token);
+                while (File.Exists(file)) await Task.Delay(20, timeout.Token);
+            }
+        }
+        finally { listener.Stop(); Directory.Delete(root, true); }
     }
 
     private static async Task TestPipeline(bool reject,bool large=false)
@@ -109,7 +225,7 @@ internal static class AgentIntegration
             var config=new AgentConfig { collector_host="localhost",collector_port=((IPEndPoint)listener.LocalEndpoint).Port,spool_dir=root };
             int sent=await Task.Run(()=>(int)typeof(WatcherAgent.Program).GetMethod("SendQueuedEvents",BindingFlags.NonPublic|BindingFlags.Static)!.Invoke(null,new object[]{config})!);
             await server;
-            Check(sent>0&&sent<8,"Slow replay did not yield to collection");
+            Check(sent>0&&sent<8,"Foreground diagnostic lost its bounded replay budget");
             Check(Directory.GetFiles(root,"*.json").Length==8-sent,"Unsent backlog was lost");
         }
         finally{listener.Stop();Directory.Delete(root,true);}

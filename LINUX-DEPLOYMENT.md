@@ -126,16 +126,16 @@ From the source checkout on a matching Debian build machine:
 
 ```bash
 bash Agent/build/build-linux.sh
-dpkg-deb -f Agent/output/watcher-agent_1.0.3_amd64.deb Version Depends
+dpkg-deb -f Agent/output/watcher-agent_1.0.4_amd64.deb Version Depends
 ```
 
-The script rejects distributions other than Debian 12/13 and architectures other than amd64. The filename is currently version 1.0.3; rebuild from current source even when the package version has not changed.
+The script rejects distributions other than Debian 12/13 and architectures other than amd64. The independent-upload-worker package is version 1.0.4. Build from current source; it upgrades the older 1.0.3 package without removing configuration or pending events.
 
 On each target device, install the newly built package. If you copied it to another directory, adjust the path:
 
 ```bash
 sudo env WATCHER_DEVICE_CATEGORY=linux_servers \
-  apt install ./Agent/output/watcher-agent_1.0.3_amd64.deb
+  apt install ./Agent/output/watcher-agent_1.0.4_amd64.deb
 sudo systemctl stop watcher-agent.service
 sudo nano /etc/watcher-agent/agent.json
 ```
@@ -196,7 +196,7 @@ Count pending files on an Agent:
 sudo find /var/lib/watcher-agent/spool -maxdepth 1 -type f -name '*.json' | wc -l
 ```
 
-After an outage, old files replay with original timestamps and are removed only after matching durable ACKs. Over a few minutes the count should trend down while catching up, with increases when new snapshots are created. The compiled Agent buffer is limited to 50,000 events; full capacity preserves existing files but prevents new collection. Update the Collector before Agents to support current event types and pipelined VPN delivery. Check source allowlists against actual VPN/NAT addresses if TCP connects but events are rejected.
+After an outage, old files replay with original timestamps and are removed only after matching durable ACKs. Over a few minutes the count should trend down while catching up, with increases when new snapshots are created. The compiled Windows/Linux Agent uploads in a background worker, independently of sampling, and drains successive passes without a collection-loop pause. It retries failed sends after five seconds. The compiled Agent buffer is limited to 50,000 events; full capacity preserves existing files but prevents new collection. Update the Collector before Agents to support current event types and pipelined VPN delivery. Check source allowlists against actual VPN/NAT addresses if TCP connects but events are rejected.
 
 ## 6 Upgrade without deleting data
 
@@ -216,11 +216,11 @@ sudo systemctl start watcher-collector.service
 
 Keep `/etc/watcher-collector/collector.json` and `/var/lib/watcher-collector`. Startup applies supported schema migrations. Recheck logs before updating Agents.
 
-For an Agent, force reinstallation of the rebuilt local package when its version remains 1.0.3:
+For an Agent, install version 1.0.4 over the old package. If reinstalling a rebuilt package with the same version, use:
 
 ```bash
 sudo env WATCHER_DEVICE_CATEGORY=linux_servers \
-  apt install --reinstall ./Agent/output/watcher-agent_1.0.3_amd64.deb
+  apt install --reinstall ./Agent/output/watcher-agent_1.0.4_amd64.deb
 ```
 
 Existing configuration and queued events are retained. Confirm the destination and restart the service. Do not purge or delete the spool to work around a delivery problem.

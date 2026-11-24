@@ -158,10 +158,10 @@ cd Agent
 ./build/build-linux.sh
 ```
 
-The package will be written to `Agent/output/watcher-agent_1.0.3_amd64.deb`. On the target Linux machine:
+The package will be written to `Agent/output/watcher-agent_1.0.4_amd64.deb`. On the target Linux machine:
 
 ```bash
-sudo env WATCHER_DEVICE_CATEGORY=linux_servers apt install ./watcher-agent_1.0.3_amd64.deb
+sudo env WATCHER_DEVICE_CATEGORY=linux_servers apt install ./watcher-agent_1.0.4_amd64.deb
 sudo systemctl status watcher-agent
 sudo journalctl -u watcher-agent -n 50 --no-pager
 ```

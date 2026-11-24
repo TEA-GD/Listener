@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -67,10 +68,28 @@ internal static class Program
                 throw new InvalidOperationException("spool_dir is required.");
             cfg.ValidateCollector();
             Directory.CreateDirectory(cfg.spool_dir);
-            Console.WriteLine($"WatcherAgent {cfg.agent_id} -> {cfg.collector_host}:{cfg.collector_port}");
-            using var mailBridge=new MailBridge(cfg,rows=>QueueBatch(cfg.spool_dir,rows));
-            Run(cfg, once);
-            return 0;
+            // Hold this for the process lifetime: the task and a manual launch must
+            // never run competing uploaders against the same spool.
+            using var spoolLock = new FileStream(Path.Combine(cfg.spool_dir, "agent.lock"),
+                FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            using var stopping = new CancellationTokenSource();
+            ConsoleCancelEventHandler cancel = (_, e) => { e.Cancel = true; stopping.Cancel(); };
+            Console.CancelKeyPress += cancel;
+            using var terminate = OperatingSystem.IsLinux()
+                ? PosixSignalRegistration.Create(PosixSignal.SIGTERM, context => { context.Cancel = true; stopping.Cancel(); })
+                : null;
+            try
+            {
+                Console.WriteLine($"WatcherAgent {cfg.agent_id} -> {cfg.collector_host}:{cfg.collector_port}");
+                using var uploader = once ? null : new UploadWorker(cfg, stopping.Token);
+                using var mailBridge = new MailBridge(cfg, rows => {
+                    QueueBatch(cfg.spool_dir, rows);
+                    uploader?.Wake();
+                });
+                Run(cfg, once, stopping.Token, uploader);
+                return 0;
+            }
+            finally { Console.CancelKeyPress -= cancel; }
         }
         catch (Exception ex)
         {
@@ -86,7 +105,7 @@ internal static class Program
         return null;
     }
 
-    private static void Run(AgentConfig cfg, bool once)
+    private static void Run(AgentConfig cfg, bool once, CancellationToken stoppingToken, UploadWorker? uploader)
     {
         Dictionary<string, Connection>? previous = null;
         DateTimeOffset lastHeartbeat = DateTimeOffset.MinValue;
@@ -119,6 +138,7 @@ internal static class Program
                 if (heartbeatDue) { events.AddRange(CreateSnapshot(cfg.agent_id, snapshot, current.Values)); events.AddRange(NetworkContext.Capture(cfg.agent_id,snapshot,cfg.device_category)); }
                 foreach (var row in events) row["DEVICE_CATEGORY"] = cfg.device_category;
                 QueueBatch(cfg.spool_dir, events);
+                uploader?.Wake();
                 previous = current;
                 if (heartbeatDue) lastHeartbeat = DateTimeOffset.UtcNow;
                 Console.WriteLine($"{DateTimeOffset.Now:o} sockets={current.Count} changes={changes.Count}");
@@ -127,18 +147,21 @@ internal static class Program
             {
                 Console.Error.WriteLine($"Collection/spool error: {ex.Message}");
             }
-            try
+            if (once)
             {
-                int delivered = SendQueuedEvents(cfg);
-                if (delivered > 0) Console.WriteLine($"Acknowledged: {delivered}");
+                // Foreground diagnostics still perform one bounded upload pass.
+                try
+                {
+                    int delivered = SendQueuedEventsAsync(cfg, stoppingToken, limitDuration: true).GetAwaiter().GetResult();
+                    if (delivered > 0) Console.WriteLine($"Acknowledged: {delivered}");
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+                catch (Exception ex) { Console.Error.WriteLine($"Collector unavailable; events retained: {ex.Message}"); }
+                break;
             }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Collector unavailable; events retained: {ex.Message}");
-            }
-            if (once) break;
-            Thread.Sleep(TimeSpan.FromMilliseconds(Math.Max(0, CollectorSettings.PollSeconds * 1000 - started.ElapsedMilliseconds)));
-        } while (true);
+            int delay = (int)Math.Max(0, CollectorSettings.PollSeconds * 1000 - started.ElapsedMilliseconds);
+            if (stoppingToken.WaitHandle.WaitOne(delay)) break;
+        } while (!stoppingToken.IsCancellationRequested);
     }
 
     private static Dictionary<string, Connection> Collect(bool collectUdp = true)
@@ -318,49 +341,74 @@ internal static class Program
         }
     }
 
-    private static int SendQueuedEvents(AgentConfig cfg)
+    // Retain a synchronous entry point for foreground diagnostics and transport checks.
+    private static int SendQueuedEvents(AgentConfig cfg) =>
+        SendQueuedEventsAsync(cfg, CancellationToken.None, limitDuration: true).GetAwaiter().GetResult();
+
+    internal static async Task<int> SendQueuedEventsAsync(AgentConfig cfg, CancellationToken stoppingToken, bool limitDuration = false)
     {
+        stoppingToken.ThrowIfCancellationRequested();
         var files = Directory.GetFiles(cfg.spool_dir, "*.json");
         Array.Sort(files, StringComparer.Ordinal);
         if (files.Length == 0) return 0;
-        var sendBudget=Stopwatch.StartNew();
-        using var tcp = new TcpClient();
-        tcp.ConnectAsync(cfg.collector_host, cfg.collector_port)
-           .WaitAsync(TimeSpan.FromSeconds(8)).GetAwaiter().GetResult();
-        tcp.ReceiveTimeout = 10000;
-        tcp.SendTimeout = 10000;
-        using var network = tcp.GetStream();
-        network.ReadTimeout = 10000;
-        network.WriteTimeout = 10000;
-        using var reader = new StreamReader(network, Encoding.ASCII, false, 1024, leaveOpen: true);
-        tcp.NoDelay=true;
-        int sent=0,index=0,window=1;
-        var pending=files.Take(CollectorSettings.SendBatchSize).ToArray();
-        byte[] Encode(string path,bool negotiate,out string id){
-            byte[] body=File.ReadAllBytes(path);
-            if(body.Length>30000)throw new IOException($"Oversized event, retained: {path}");
-            using var payload=JsonDocument.Parse(body);id=payload.RootElement.GetProperty("EVENT_ID").GetString()!;
-            byte[] bytes=negotiate?JsonSerializer.SerializeToUtf8Bytes(new { @event=payload.RootElement,request_pipeline=true }):JsonSerializer.SerializeToUtf8Bytes(new { @event=payload.RootElement });
-            if(bytes.Length+1>32768)throw new IOException("Envelope too large; event retained");return bytes;
+        var passClock = Stopwatch.StartNew();
+        using var tcp = new TcpClient { NoDelay = true };
+        using (var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
+        {
+            connectTimeout.CancelAfter(TimeSpan.FromSeconds(8));
+            await tcp.ConnectAsync(cfg.collector_host, cfg.collector_port, connectTimeout.Token);
         }
-        while(index<pending.Length){
-            if(sent>0&&sendBudget.Elapsed>=TimeSpan.FromSeconds(5))break;
-            var group=new List<(string Path,string Id,byte[] Body)>();int bytes=0;
-            while(index<pending.Length&&group.Count<window){
-                byte[] body=Encode(pending[index],index==0,out string id);
-                if(group.Count>0&&bytes+body.Length+1>131072)break;
-                group.Add((pending[index],id,body));bytes+=body.Length+1;index++;
+        using var network = tcp.GetStream();
+        using var reader = new StreamReader(network, Encoding.ASCII, false, 1024, leaveOpen: true);
+        int sent = 0, index = 0, window = 1;
+        var pending = files.Take(CollectorSettings.SendBatchSize).ToArray();
+        byte[] Encode(string path, bool negotiate, out string id)
+        {
+            byte[] body = File.ReadAllBytes(path);
+            if (body.Length > 30000) throw new IOException($"Oversized event, retained: {path}");
+            using var payload = JsonDocument.Parse(body);
+            id = payload.RootElement.GetProperty("EVENT_ID").GetString()!;
+            byte[] json = negotiate
+                ? JsonSerializer.SerializeToUtf8Bytes(new { @event = payload.RootElement, request_pipeline = true })
+                : JsonSerializer.SerializeToUtf8Bytes(new { @event = payload.RootElement });
+            if (json.Length + 1 > 32768) throw new IOException("Envelope too large; event retained");
+            byte[] line = new byte[json.Length + 1];
+            json.CopyTo(line, 0);
+            line[^1] = (byte)'\n';
+            return line;
+        }
+        while (index < pending.Length)
+        {
+            stoppingToken.ThrowIfCancellationRequested();
+            if (limitDuration && sent > 0 && passClock.Elapsed >= TimeSpan.FromSeconds(5)) break;
+            var group = new List<(string Path, string Id, byte[] Body)>();
+            int bytes = 0;
+            while (index < pending.Length && group.Count < window)
+            {
+                byte[] body = Encode(pending[index], index == 0, out string id);
+                if (group.Count > 0 && bytes + body.Length > 131072) break;
+                group.Add((pending[index], id, body));
+                bytes += body.Length;
+                index++;
             }
-            // Write the bounded group before waiting; ACKs remain ordered and per event.
-            foreach(var item in group){network.Write(item.Body);network.WriteByte((byte)'\n');}network.Flush();
-            foreach(var item in group){
-                string? ack=reader.ReadLine();
-                if(sent==0&&ack=="ACK "+item.Id+" PIPELINE64")window=64;
-                else if(ack!="ACK "+item.Id)throw new IOException("Collector did not acknowledge event: "+ack);
-                File.Delete(item.Path);sent++;
+            // Collection runs independently; no five-second yield is needed here.
+            // Preserve bounded groups and ordered, per-event durable ACKs.
+            using (var writeTimeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
+            {
+                writeTimeout.CancelAfter(TimeSpan.FromSeconds(10));
+                foreach (var item in group) await network.WriteAsync(item.Body, writeTimeout.Token);
+            }
+            foreach (var item in group)
+            {
+                using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                readTimeout.CancelAfter(TimeSpan.FromSeconds(10));
+                string? ack = await reader.ReadLineAsync(readTimeout.Token);
+                if (sent == 0 && ack == "ACK " + item.Id + " PIPELINE64") window = 64;
+                else if (ack != "ACK " + item.Id) throw new IOException("Collector did not acknowledge event: " + ack);
+                File.Delete(item.Path);
+                sent++;
             }
         }
         return sent;
     }
-
 }

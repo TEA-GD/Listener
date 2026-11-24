@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 ROOT=Path(__file__).resolve().parents[1]
-PACKAGE=ROOT/'Agent/output/watcher-agent_1.0.3_amd64.deb'
+PACKAGE=ROOT/'Agent/output/watcher-agent_1.0.4_amd64.deb'
 
 class LinuxPackage(unittest.TestCase):
     def test_metadata_and_service_layout(self):

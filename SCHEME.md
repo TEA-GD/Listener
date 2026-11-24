@@ -8,8 +8,10 @@ Listener collects connection/network/process observations from devices and attac
 flowchart LR
     T[Single Thunderbird attachment add-on] -->|Authenticated loopback HTTP 58766| A[Compiled Agent]
     A --> S[Durable local spool]
-    P[PowerShell ServerAgent connection sampler] --> S
-    S -->|Plain TCP 6515 and durable ACKs| C[Collector]
+    P[PowerShell ServerAgent connection sampler] --> PS[ServerAgent spool and existing sender]
+    S --> U[Compiled Agent independent uploader]
+    U -->|Plain TCP 6515 and durable ACKs| C[Collector]
+    PS -->|Plain TCP 6515 and durable ACKs| C
     C --> D[(SQLite)]
     D --> G[Read-only GUI HTTP 5080]
     D --> N[Analyzer reads connection events]
@@ -23,7 +25,7 @@ The installer selects Linux servers, Windows servers, User PCs or Project Stands
 
 Agents poll sockets, record open/close events and send complete TCP/UDP snapshots on each heartbeat (normally one minute). A count marker prevents partial socket snapshots from becoming authoritative. UDP bindings may have no known remote endpoint. Historical observations and reported active sockets are separate views; polling can miss brief activity.
 
-Spool files survive network outages and are deleted only after matching durable Collector ACKs. Original timestamps and IDs survive replay. The first event can negotiate `PIPELINE64`, enabling up to 64 events/128 KiB in flight; legacy peers retain sequential behavior. Send passes yield between groups after approximately five seconds and are bounded by the batch limit. The compiled Agent spool is capped at 50,000 events; a full spool preserves pending files but stops new collection.
+Spool files survive network outages and are deleted only after matching durable Collector ACKs. Original timestamps and IDs survive replay. The first event can negotiate `PIPELINE64`, enabling up to 64 events/128 KiB in flight; legacy peers retain sequential behavior. The compiled Windows/Linux Agent uploads in a separate worker, immediately continuing after each bounded 1,000-file pass while sampling runs independently. Failed sends back off five seconds; an idle worker wakes on publication or rescans after one second. A process-lifetime spool lock prevents competing compiled Agent instances. The separate PowerShell ServerAgent still yields between groups after approximately five seconds. The compiled Agent spool is capped at 50,000 events; a full spool preserves pending files but stops new collection.
 
 ## Derived views and network context
 

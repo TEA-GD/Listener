@@ -64,7 +64,7 @@ UDP closing/opening is an observation of table changes, not a network handshake.
 
 ```bash
 bash Agent/build/build-linux.sh
-sudo apt install ./Agent/output/watcher-agent_1.0.3_amd64.deb
+sudo apt install ./Agent/output/watcher-agent_1.0.4_amd64.deb
 ```
 
 6. Rebuild/restart Listener_DB_GUI and Listener_Analyzer for their UDP views and

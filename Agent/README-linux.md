@@ -39,8 +39,8 @@ From the existing repository root:
 ```bash
 git pull --ff-only
 bash Agent/build/build-linux.sh
-dpkg-deb -f Agent/output/watcher-agent_1.0.3_amd64.deb Version Depends
-sudo apt install ./Agent/output/watcher-agent_1.0.3_amd64.deb
+dpkg-deb -f Agent/output/watcher-agent_1.0.4_amd64.deb Version Depends
+sudo apt install ./Agent/output/watcher-agent_1.0.4_amd64.deb
 ```
 
 APT installs the declared dependencies from your configured repositories. If APT reports dependency or configuration errors, resolve them before starting
@@ -86,7 +86,7 @@ After building:
 
 ```bash
 python tests/test_linux_package.py
-apt-get -s install ./Agent/output/watcher-agent_1.0.3_amd64.deb
+apt-get -s install ./Agent/output/watcher-agent_1.0.4_amd64.deb
 ```
 
 Tests extract the package without installing it, check service/script paths and
@@ -100,7 +100,7 @@ must still be performed on the target server.
 The package asks for `linux_servers`, `windows_servers`, `user_pcs`, or `project_stands` when creating a configuration or upgrading one without a category. For unattended installation, pass the choice explicitly:
 
 ```bash
-sudo env WATCHER_DEVICE_CATEGORY=linux_servers apt install ./Agent/output/watcher-agent_1.0.3_amd64.deb
+sudo env WATCHER_DEVICE_CATEGORY=linux_servers apt install ./Agent/output/watcher-agent_1.0.4_amd64.deb
 ```
 
 A saved category is preserved on upgrade. To change it later, edit `device_category` in `/etc/watcher-agent/agent.json` and restart `watcher-agent`. Already queued events retain their original category. Update the Collector first; see [device storage](../DEVICE-STORAGE.md).
@@ -114,4 +114,4 @@ sudo apt remove watcher-agent
 
 This keeps `/etc/watcher-agent/agent.json` and `/var/lib/watcher-agent/spool`. `apt purge watcher-agent` removes the main config but still retains the spool. Full data deletion is a separate irreversible action; see [the complete removal procedure](../LINUX-DEPLOYMENT.md#7-uninstall-the-agent-and-retain-its-data).
 
-For an upgrade from rebuilt source with the same package version, use `sudo env WATCHER_DEVICE_CATEGORY=linux_servers apt install --reinstall ./Agent/output/watcher-agent_1.0.3_amd64.deb`. The unit now uses `/var/lib/watcher-agent/.net` for single-file bundle extraction, within its writable state area.
+For an upgrade from rebuilt source with the same package version, use `sudo env WATCHER_DEVICE_CATEGORY=linux_servers apt install --reinstall ./Agent/output/watcher-agent_1.0.4_amd64.deb`. The unit now uses `/var/lib/watcher-agent/.net` for single-file bundle extraction, within its writable state area.
