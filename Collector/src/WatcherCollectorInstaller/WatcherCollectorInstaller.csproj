@@ -12,8 +12,12 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="payload/WatcherCollector.exe" LogicalName="Watcher.Collector.Exe" />
+    <EmbeddedResource Include="payload/connection/Listener_ConnectionAnalyzer.exe" LogicalName="Watcher.ConnectionAnalyzer.Exe" />
+    <EmbeddedResource Include="payload/behavior/Listener_Analyzer.exe" LogicalName="Watcher.BehaviorAnalyzer.Exe" />
   </ItemGroup>
   <Target Name="PrepareCollectorPayload" BeforeTargets="AssignTargetPaths" Condition="'$(DesignTimeBuild)' != 'true'">
     <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)/../WatcherCollector/WatcherCollector.csproj&quot; -c $(Configuration) -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none -o &quot;$(MSBuildProjectDirectory)/payload&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)/../../../Listener_ConnectionAnalyzer/Listener_ConnectionAnalyzer.csproj&quot; -c $(Configuration) -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none -o &quot;$(MSBuildProjectDirectory)/payload/connection&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)/../../../Listener_Analyzer/Listener_Analyzer.csproj&quot; -c $(Configuration) -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none -o &quot;$(MSBuildProjectDirectory)/payload/behavior&quot;" />
   </Target>
 </Project>

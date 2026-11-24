@@ -343,3 +343,10 @@ The page shows unique Incoming/Outgoing/Unknown connections and first-seen conne
 or peer IPs for a selected day/time zone. Upgrade the Collector, then Agents (Linux
 package 1.0.5), then start the module/update the GUI. Historical reports remain Unknown;
 new TCP directions are explicitly estimated from listening ports.
+
+## Automatic Collector + analyzer setup
+
+The rebuilt Windows Collector installer now embeds/configures both analyzers, with
+managed startup tasks and combined Start/Stop controls. Linux's Collector build now
+includes both modules and one-command install/remove helpers. Existing configuration,
+analysis history and alert settings are retained. See [automatic Collector installation](Collector/INSTALLATION.md).

@@ -39,12 +39,14 @@ internal sealed class SetupForm : Form
     private readonly Button _stop = new();
     private readonly Button _uninstall = new();
     private readonly CheckBox _deleteData = new();
+    private readonly CheckBox _analyzers = new();
+    private AnalyzerInstallation Analyzers => new(AppDir, DataDir, Run, Write);
 
     public SetupForm()
     {
         Text = "Watcher Collector — Windows Setup V6";
-        ClientSize = new Size(760, 690);
-        MinimumSize = new Size(760, 690);
+        ClientSize = new Size(760, 710);
+        MinimumSize = new Size(760, 710);
         Font = new Font("Segoe UI", 9);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -66,45 +68,50 @@ internal sealed class SetupForm : Form
         _networks.PlaceholderText = "Blank = any sender; or e.g. 192.168.88.0/24";
         Controls.Add(_networks);
         AddLabel("WARNING: Plain TCP; no encryption or sender authentication. Use restricted VLAN/firewall.", 20, 269, bold: true);
-        AddLabel("Installation messages", 20, 310);
-        _log.SetBounds(20, 333, 716, 202);
+        _analyzers.Text = "Install and manage both analyzers (connection analysis and behavioral alerts)";
+        _analyzers.Checked = true; _analyzers.SetBounds(20, 303, 716, 27); Controls.Add(_analyzers);
+        AddLabel("Database paths and background startup are configured automatically.", 20, 335);
+        AddLabel("Installation messages", 20, 375);
+        _log.SetBounds(20, 398, 716, 157);
         _log.Multiline = true;
         _log.ScrollBars = ScrollBars.Vertical;
         _log.ReadOnly = true;
         _log.Font = new Font("Consolas", 9);
-        _log.Text = "No Python, certificate or token required. This installer embeds WatcherCollector.exe.\r\n" +
+        _log.Text = "No Python, certificate or token required. This installer embeds the Collector and both analyzers.\r\n" +
             $"Service: {ServiceName}\r\nData: {DataDir}\r\n" +
             "Listens on all IPv4 interfaces. Agent networks are optional.\r\n";
         Controls.Add(_log);
         _deleteData.Text = "Also delete collector configuration, SQLite database and logs in ProgramData";
-        _deleteData.SetBounds(20, 547, 710, 25);
+        _deleteData.SetBounds(20, 567, 710, 25);
         _deleteData.Checked = false; // Preserve collector history by default.
         Controls.Add(_deleteData);
-        AddLabel("CSV exports are always preserved, including any custom export location.", 20, 575);
+        AddLabel("CSV exports are always preserved, including any custom export location.", 20, 595);
 
         _install.Text = "Install / Update";
-        _install.SetBounds(20, 625, 148, 36);
+        _install.SetBounds(20, 645, 148, 36);
         _install.Click += (_, _) => Execute(Install);
         Controls.Add(_install);
         _start.Text = "Start Service";
-        _start.SetBounds(179, 625, 127, 36);
+        _start.SetBounds(179, 645, 127, 36);
         _start.Click += (_, _) => Execute(StartService);
         Controls.Add(_start);
         _stop.Text = "Stop Service";
-        _stop.SetBounds(317, 625, 125, 36);
+        _stop.SetBounds(317, 645, 125, 36);
         _stop.Click += (_, _) => Execute(StopService);
         Controls.Add(_stop);
         _uninstall.Text = "Uninstall Collector";
-        _uninstall.SetBounds(453, 625, 155, 36);
+        _uninstall.SetBounds(453, 645, 155, 36);
         _uninstall.Click += (_, _) => Execute(Uninstall);
         Controls.Add(_uninstall);
         var close = new Button { Text = "Close" };
-        close.SetBounds(630, 625, 106, 36);
+        close.SetBounds(630, 645, 106, 36);
         close.Click += (_, _) => Close();
         Controls.Add(close);
         if (!new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator))
             Write("ERROR: Run this installer as Administrator. It should request UAC automatically.");
         if (File.Exists(ConfigPath)) LoadCurrentConfig();
+        try { if (File.Exists(Analyzers.Manifest)) _analyzers.Checked = Analyzers.Enabled; }
+        catch (Exception ex) { Write("Analyzer settings unreadable: " + ex.Message); }
     }
 
     private void AddLabel(string message, int x, int y, bool bold = false)
@@ -135,14 +142,19 @@ internal sealed class SetupForm : Form
     }
     private void Execute(Action action)
     {
-        _install.Enabled = _start.Enabled = _stop.Enabled = _uninstall.Enabled = _deleteData.Enabled = false;
+        _install.Enabled = _start.Enabled = _stop.Enabled = _uninstall.Enabled = _deleteData.Enabled = _analyzers.Enabled = false;
         try { action(); }
         catch (Exception ex)
         {
             Write("ERROR: " + ex);
+            if (action.Method.Name == nameof(Install))
+            {
+                try { StartCollectorService(); Write("Collector service restart requested after setup failure; analyzer configuration backups are retained."); }
+                catch (Exception recovery) { Write("Collector restart also failed: " + recovery.Message); }
+            }
             MessageBox.Show(this, ex.Message, "Watcher Collector setup error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
-        finally { _install.Enabled = _start.Enabled = _stop.Enabled = _uninstall.Enabled = _deleteData.Enabled = true; }
+        finally { _install.Enabled = _start.Enabled = _stop.Enabled = _uninstall.Enabled = _deleteData.Enabled = _analyzers.Enabled = true; }
     }
     private void Install()
     {
@@ -150,44 +162,22 @@ internal sealed class SetupForm : Form
             throw new UnauthorizedAccessException("Start the installer with administrator permissions.");
         string[] ranges = _networks.Text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         foreach (string range in ranges) ValidateCidr(range);
-        Write("Stopping previous collector, if installed...");
-        StopService();
-        Directory.CreateDirectory(AppDir);
         Directory.CreateDirectory(DataDir);
         LimitDataPermissions();
+        string defaultDatabase = File.Exists(@"C:\Watcher\Collector\watcher-events.db") && !File.Exists(ConfigPath)
+            ? @"C:\Watcher\Collector\watcher-events.db" : Path.Combine(DataDir, "watcher-events.db");
+        var settings = SetupFiles.Collector(ConfigPath, defaultDatabase, @"C:\Watcher\Feeds\Connections", Path.Combine(DataDir, "collector.log"), (int)_port.Value, ranges);
+        string dbPath = SetupFiles.Text(settings, "database_path"), csvPath = SetupFiles.Text(settings, "csv_dir");
+        // Parse existing analyzer configs before stopping anything; never replace unreadable JSON.
+        if (_analyzers.Checked) foreach (var entry in Analyzers.Entries) SetupFiles.Read(entry.Config);
+        Write("Stopping Collector and managed analyzers...");
+        StopService();
+        Directory.CreateDirectory(AppDir);
+        Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!); Directory.CreateDirectory(csvPath);
         Write("Extracting embedded collector executable...");
-        using (var input = Assembly.GetExecutingAssembly().GetManifestResourceStream("Watcher.Collector.Exe")
-                          ?? throw new FileNotFoundException("Embedded WatcherCollector.exe missing. Use build\\build-windows.ps1."))
-        using (var output = File.Create(Executable)) input.CopyTo(output);
-        Write("No TLS certificates or keys will be created or loaded.");
-        string dbPath = Path.Combine(DataDir, "watcher-events.db");
-        string csvPath = @"C:\Watcher\Feeds\Connections";
-        if (File.Exists(ConfigPath))
-        {
-            using var prior = JsonDocument.Parse(File.ReadAllText(ConfigPath));
-            if (prior.RootElement.TryGetProperty("database_path", out var d) && d.ValueKind == JsonValueKind.String)
-                dbPath = d.GetString() ?? dbPath;
-            if (prior.RootElement.TryGetProperty("csv_dir", out var c) && c.ValueKind == JsonValueKind.String)
-                csvPath = c.GetString() ?? csvPath;
-            File.Copy(ConfigPath, ConfigPath + ".bak", overwrite: true);
-        }
-        else if (File.Exists(@"C:\Watcher\Collector\watcher-events.db"))
-        {
-            dbPath = @"C:\Watcher\Collector\watcher-events.db";
-            Write("Detected existing Python collector SQLite database. Reusing it.");
-        }
-        Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
-        Directory.CreateDirectory(csvPath);
-        var settings = new
-        {
-            bind_host = "0.0.0.0", bind_port = (int)_port.Value,
-            database_path = dbPath, csv_dir = csvPath,
-            log_file = Path.Combine(DataDir, "collector.log"),
-            csv_export_seconds = 10, max_clients = 64,
-            allowed_client_cidrs = ranges
-        };
-        File.WriteAllText(ConfigPath, JsonSerializer.Serialize(settings,
-            new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
+        using (var input = Assembly.GetExecutingAssembly().GetManifestResourceStream("Watcher.Collector.Exe") ?? throw new FileNotFoundException("Embedded Collector missing"))
+            SetupFiles.Write(Executable, input);
+        SetupFiles.Save(ConfigPath, settings);
         Write("Checking collector configuration and SQLite access...");
         Run(Executable, new[] { "--config", ConfigPath, "--check-config" }, allowFailure: false);
         string commandLine = $"\"{Executable}\" --config \"{ConfigPath}\"";
@@ -209,13 +199,16 @@ internal sealed class SetupForm : Form
             $"New-NetFirewallRule -DisplayName '{safeName}' -Direction Inbound -Protocol TCP " +
             $"-LocalPort {_port.Value} -RemoteAddress {cidrs} -Profile Domain,Private -Action Allow | Out-Null";
         Run("powershell.exe", new[] { "-NoProfile", "-NonInteractive", "-Command", ps });
-        Write("Starting Windows service...");
+        if (_analyzers.Checked) Analyzers.Install(dbPath);
+        Analyzers.SetEnabled(_analyzers.Checked);
+        Write("Starting Collector and enabled analyzers...");
         StartService();
         Write("SUCCESS. Executable: " + Executable);
         Write("CSV: " + csvPath);
         Write("Log: " + Path.Combine(DataDir, "collector.log"));
         MessageBox.Show(this, "Watcher Collector installed.\n\n" +
-            "NO certificates or tokens. Install the matching PLAIN-TCP WatcherAgent build.\n" +
+            (_analyzers.Checked ? "Both analyzers are configured and running. Open It's time to analyze in the updated GUI.\n" : "Analyzer automatic startup is disabled.\n") +
+            "Install the matching PLAIN-TCP WatcherAgent build.\n" +
             "WARNING: Restrict access by firewall or management VLAN.",
             "Installation completed", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
@@ -226,7 +219,8 @@ internal sealed class SetupForm : Form
             throw new UnauthorizedAccessException("Run the installer as Administrator to uninstall the service.");
         bool deleteData = _deleteData.Checked;
         string warning = "Uninstall Watcher Collector?\n\n" +
-            "This removes the Windows service, installed executable and Watcher TCP/TLS firewall rules.\n" +
+            "This removes the Collector service, bundled analyzers, their startup tasks and Watcher firewall rules.\n" +
+            "Analyzer configuration, databases and alert files are always preserved.\n" +
             "This does not affect Watcher Agents on other computers.\n\n" +
             (deleteData
                 ? "WARNING: ProgramData collector.json, local SQLite database and collector.log will be PERMANENTLY DELETED.\n"
@@ -246,7 +240,8 @@ internal sealed class SetupForm : Form
                 MessageBoxIcon.Stop, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
         }
 
-        Write("Uninstalling Watcher Collector...");
+        Write("Uninstalling Watcher Collector and managed analyzer startup tasks...");
+        Analyzers.RemoveTasks();
         if (ServiceExists())
         {
             StopService();
@@ -293,7 +288,7 @@ internal sealed class SetupForm : Form
         MessageBox.Show(this,
             "Watcher Collector has been uninstalled.\n\n" +
             (deleteData ? "Collector ProgramData was deleted.\n" : "Collector ProgramData was preserved.\n") +
-            "CSV exports and any externally configured SQLite database were preserved.\n" +
+            "Analyzer configuration, databases, alerts, CSV exports and external SQLite files were preserved.\n" +
             "No Watcher Agent installations were changed.",
             "Watcher Collector Uninstalled", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
@@ -322,6 +317,7 @@ internal sealed class SetupForm : Form
     private static void Sc(params string[] args) => Run("sc.exe", args);
     private void StopService()
     {
+        Analyzers.Stop();
         if (!ServiceExists()) { Write("No existing WatcherCollector service."); return; }
         string response = Run("sc.exe", new[] { "query", ServiceName }, allowFailure: true);
         if (response.Contains("STOPPED", StringComparison.OrdinalIgnoreCase))
@@ -339,6 +335,11 @@ internal sealed class SetupForm : Form
         throw new TimeoutException("Service failed to stop; refusing to overwrite an active executable.");
     }
     private void StartService()
+    {
+        StartCollectorService();
+        Analyzers.Start();
+    }
+    private void StartCollectorService()
     {
         if (!ServiceExists()) throw new InvalidOperationException("WatcherCollector service isn't installed.");
         string response = Run("sc.exe", new[] { "query", ServiceName });
@@ -367,10 +368,11 @@ internal sealed class SetupForm : Form
         using var process = Process.Start(info) ?? throw new IOException("Could not execute " + executable);
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(30000))
+        int timeout = info.ArgumentList.Contains("--check-config") ? 300000 : 30000;
+        if (!process.WaitForExit(timeout))
         {
             process.Kill(entireProcessTree: true);
-            throw new TimeoutException(executable + " did not finish within 30 seconds");
+            throw new TimeoutException(executable + " did not finish within its setup timeout");
         }
         Task.WaitAll(stdout, stderr);
         string result = stdout.Result + stderr.Result;

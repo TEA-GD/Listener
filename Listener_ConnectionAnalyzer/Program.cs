@@ -10,15 +10,18 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
+        AnalyzerLog? persistentLog = null;
         try
         {
-            if (args.Contains("--help")) { Console.WriteLine("Listener_ConnectionAnalyzer --config config.json [--once]"); return 0; }
+            persistentLog = AnalyzerLog.Open(args);
+            if (args.Contains("--help")) { Console.WriteLine("Listener_ConnectionAnalyzer --config config.json [--once | --check-config] [--log PATH]"); return 0; }
             int at = Array.IndexOf(args, "--config");
             string path = at < 0 ? "config.json" : at + 1 < args.Length ? args[at + 1] : throw new ArgumentException("Missing config path");
             var config = Config.Load(path);
             Directory.CreateDirectory(Path.GetDirectoryName(config.analysis_database)!);
             using var processLock = new FileStream(config.analysis_database + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             using var analyzer = new ConnectionAnalyzer(config);
+            if (args.Contains("--check-config")) { Console.WriteLine("CONFIG OK: analyzer state initialized; no history processed."); return 0; }
             using var stop = new CancellationTokenSource();
             Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Cancel(); };
             using var terminate = OperatingSystem.IsLinux() ? PosixSignalRegistration.Create(PosixSignal.SIGTERM, e => { e.Cancel = true; stop.Cancel(); }) : null;
@@ -33,6 +36,7 @@ internal static class Program
         }
         catch (OperationCanceledException) { return 0; }
         catch (Exception ex) { Console.Error.WriteLine("Connection analyzer stopped: " + ex.Message); return 1; }
+        finally { persistentLog?.Dispose(); }
     }
 }
 

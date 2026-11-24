@@ -66,3 +66,12 @@ TCP direction metadata is estimated at the Agent using local listeners and prese
 by the updated Collector; older/ambiguous observations remain Unknown. Original event
 time, opposite-direction history and late replay determine novelty. This is separate
 from the existing alert analyzer. See [deployment and semantics](Listener_ConnectionAnalyzer/README.md).
+
+## Managed analyzer installation
+
+Collector setup now bundles both analyzers. Windows registers SYSTEM startup tasks
+and initializes their config/state against the configured Collector DB; Start/Stop in
+setup manages service and tasks. The Linux bundle's installer creates matching systemd
+units with Collector stop/restart propagation. Existing thresholds, custom paths and
+history are retained. Defaults match the GUI analysis DB path; Linux setup also writes
+`/etc/watcher-collector/gui.env`. See [automatic setup](Collector/INSTALLATION.md).

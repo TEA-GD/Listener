@@ -160,3 +160,13 @@ late historical replay, cross-direction and per-device novelty, time zones,
 Unknown fallback, continuous processing and browser filters/escaping. Agent checks
 include real Linux local-listener/client sockets and mocked Windows cmdlet queries.
 Windows Task Scheduler and live Windows collection require a target Windows check.
+
+## Automatic installation with Collector
+
+The current Collector installer/bundle can install, configure and start this module
+alongside the other analyzer. Normal deployments no longer need the separate manual
+steps above. Existing managed config/state is preserved; source paths follow the
+Collector. See [Collector automatic setup](../Collector/INSTALLATION.md).
+
+Both modules accept `--check-config` to initialize/check state without learning history
+or delivering alerts, and `--log PATH` to save stdout/stderr for background tasks.

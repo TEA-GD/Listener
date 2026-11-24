@@ -4,6 +4,23 @@ Use this procedure for **Debian 12 or Debian 13 on amd64 with systemd**. Install
 
 The Agent has a Debian package. The Collector uses a self-contained Linux build and the systemd unit supplied in `Collector/linux/`; there is no Collector `.deb`. The opt-in Linux build leaves the normal Windows build unchanged. Ubuntu, RHEL and ARM package installation is not covered by these steps.
 
+## Recommended: automatic Collector and analyzer installation
+
+After preparing/building on a compatible host below, `Collector/build/build-linux.sh`
+now produces one bundle containing Collector and both analyzers. Copy its whole
+`Collector/output/linux-collector` directory to the server, ensure Python 3 is installed,
+and run from that copied folder:
+
+```bash
+sudo bash ./install-linux.sh --port 6515 --allow-cidr 192.168.10.0/24 --allow-cidr 10.8.0.0/24
+```
+
+It generates configs from the actual Collector DB path, preserves existing settings
+and history, and installs/enables/starts all three systemd services. Uninstall with
+`sudo bash /opt/watcher-collector/uninstall-linux.sh`; all data/configuration is retained.
+See [automatic setup options, paths and GUI environment](Collector/INSTALLATION.md).
+The numbered Collector installation steps below remain the manual alternative.
+
 ## 1 Prepare a build machine
 
 Build on the same Debian release as the target. You can build on the target server, or copy the complete Collector publish folder and Agent `.deb` to matching servers. Only the build machine needs the .NET **10 SDK**, Git and NuGet access. Self-contained applications still require native OS libraries.

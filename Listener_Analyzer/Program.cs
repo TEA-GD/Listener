@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
@@ -10,16 +11,20 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
+        AnalyzerLog? persistentLog = null;
         try
         {
-            if (args.Contains("--help")) { Console.WriteLine("Listener_Analyzer --config config.json [--once] [--export-profiles report.json]"); return 0; }
+            persistentLog = AnalyzerLog.Open(args);
+            if (args.Contains("--help")) { Console.WriteLine("Listener_Analyzer --config config.json [--once | --check-config] [--log PATH] [--export-profiles report.json]"); return 0; }
             string Option(string name, string fallback) { int i=Array.IndexOf(args,name); return i<0?fallback:i+1<args.Length?args[i+1]:throw new ArgumentException("Missing value for " + name); }
             var config=AnalyzerConfig.Load(Option("--config","config.json"));
             Directory.CreateDirectory(config.state_directory);
             using var processLock=new FileStream(Path.Combine(config.state_directory,"analyzer.lock"),FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);
             using var analyzer=new Analyzer(config);
+            if (args.Contains("--check-config")) { Console.WriteLine("CONFIG OK: analyzer state initialized; no history processed or alerts delivered."); return 0; }
             using var stop=new CancellationTokenSource();
             Console.CancelKeyPress+=(_,e)=>{e.Cancel=true;stop.Cancel();};
+            using var terminate = OperatingSystem.IsLinux() ? PosixSignalRegistration.Create(PosixSignal.SIGTERM, e => { e.Cancel = true; stop.Cancel(); }) : null;
             do
             {
                 int count;
@@ -33,6 +38,7 @@ internal static class Program
         }
         catch(OperationCanceledException) { return 0; }
         catch(Exception ex) { Console.Error.WriteLine("Analyzer stopped: "+ex.Message); return 1; }
+        finally { persistentLog?.Dispose(); }
     }
 }
 

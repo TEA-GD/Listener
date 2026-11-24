@@ -232,3 +232,13 @@ new/rare/returned alerts; default false avoids ephemeral-port noise. Their
 payloads include source_ip/source_port and local_endpoint=true, explicitly
 stating the remote peer is unavailable. Existing state is upgraded additively.
 See [UDP.md](../Agent/UDP.md) for platform limits and upgrade order.
+
+## Automatic installation with Collector
+
+The current Collector installer/bundle can install, configure and start this module
+alongside the other analyzer. Normal deployments no longer need the separate manual
+steps above. Existing managed config/state is preserved; source paths follow the
+Collector. See [Collector automatic setup](../Collector/INSTALLATION.md).
+
+Both modules accept `--check-config` to initialize/check state without learning history
+or delivering alerts, and `--log PATH` to save stdout/stderr for background tasks.
